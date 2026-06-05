@@ -1,0 +1,40 @@
+﻿ABUZ8 OS - END USER LICENSE AGREEMENT (COMMERCIAL)
+Copyright (c) 2026 ABUZ8 LLC (Ohio, USA).
+
+[TEMPLATE - have legal counsel review before selling at scale.]
+
+1. LICENSE GRANT. Upon purchase, ABUZ8 LLC grants you a perpetual, non-exclusive,
+   non-transferable license to install and use one (1) copy of the ABUZ8-authored
+   software ("Qadir OS") for personal or commercial purposes, including running your
+   own business operations.
+
+2. ONE-TIME PURCHASE. Your purchase is a one-time payment. No subscription. Updates,
+   if provided, are at ABUZ8's discretion.
+
+3. RESTRICTIONS. You may not resell, redistribute, sublicense, or repackage the
+   ABUZ8-authored software as your own product. You may use its outputs freely.
+
+4. THIRD-PARTY COMPONENTS. This product includes open-source software under its own
+   licenses (see THIRD_PARTY_NOTICES.txt). Those components remain governed by their
+   respective licenses, not this EULA.
+
+5. EMBEDDED MODEL (LFM2). The bundled Liquid AI LFM2 model is provided under the LFM
+   Open License v1.0. Commercial use is permitted for organizations under USD $10M in
+   annual revenue. Above that threshold, you must obtain a commercial license directly
+   from Liquid AI (sales@liquid.ai). This obligation passes to you, the end user.
+
+6. OWNERSHIP. ABUZ8 LLC retains all right, title, and interest in the ABUZ8-authored
+   software. No ownership is transferred by this license.
+
+7. NO WARRANTY. The software is provided "AS IS", without warranty of any kind. You
+   assume all risk arising from its use.
+
+8. LIMITATION OF LIABILITY. To the maximum extent permitted by law, ABUZ8 LLC shall
+   not be liable for any indirect, incidental, special, or consequential damages
+   arising from use of the software.
+
+9. TERMINATION. This license terminates automatically upon breach of its terms.
+
+10. GOVERNING LAW. This Agreement is governed by the laws of the State of Ohio, USA.
+
+Contact: ABUZ8 LLC - ahmad@abuz8ai.com

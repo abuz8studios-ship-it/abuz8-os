@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f5f0e8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ABUZ8 Control">
+  <link rel="manifest" href="manifest.json">
+  <title>ABUZ8 Mobile Control</title>
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#171717;background:#fafaf7}
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:#fafaf7}
+    body{padding:14px;padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+    header{position:sticky;top:0;z-index:2;margin:-14px -14px 12px;padding:14px;background:#f5f0e8;border-bottom:1px solid #ded6c8}
+    h1{margin:0;font-size:22px;line-height:1.1;letter-spacing:0;color:#171717}
+    .sub{margin-top:4px;font-size:12px;color:#665f53}
+    .stack{display:grid;gap:10px;max-width:720px;margin:0 auto}
+    .card{background:#fff;border:1px solid #ded6c8;border-radius:8px;padding:12px;box-shadow:0 2px 8px rgba(31,25,15,.05)}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .title{font-weight:800;font-size:14px;color:#171717}
+    .meta{margin-top:5px;font-size:12px;line-height:1.45;color:#665f53;overflow-wrap:anywhere}
+    .badge{font:800 10px ui-monospace,SFMono-Regular,Consolas,monospace;border:1px solid #ded6c8;border-radius:999px;padding:3px 8px;color:#8a5a00;background:#fffaf0}
+    .badge.live{color:#0b8068;background:#f0fbf7;border-color:#b8e6d8}
+    input,textarea,select,button{font:inherit}
+    input,textarea{width:100%;border:1px solid #d8d0c2;border-radius:8px;background:#fff;padding:10px;color:#171717}
+    textarea{min-height:96px;resize:vertical}
+    button{border:1px solid #cfc6b8;background:#f5f0e8;color:#171717;border-radius:8px;padding:10px 12px;font-weight:800}
+    button.primary{background:#171717;color:#fff;border-color:#171717}
+    button:disabled{opacity:.55}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .quick{display:grid;grid-template-columns:1fr;gap:8px}
+    .chatlog{display:grid;gap:8px;max-height:38vh;overflow:auto;padding-right:2px}
+    .msg{border-radius:8px;padding:9px 10px;font-size:13px;line-height:1.45;white-space:pre-wrap}
+    .me{background:#f5f0e8}
+    .bot{background:#f0fbf7;border:1px solid #cfeee3}
+    .err{background:#fff3f0;border:1px solid #f0c5b8;color:#8c2f17}
+    a{color:#0b5cab}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ABUZ8 Control</h1>
+    <div class="sub">Phone-first controller for Qadir, ComfyUI, local brains, and MCP paths.</div>
+  </header>
+
+  <main class="stack">
+    <section class="card">
+      <div class="title">Qadir API</div>
+      <div class="meta">Use a LAN, Tailscale, or Cloudflare URL when controlling the Windows machine from iPhone or Android.</div>
+      <div style="height:8px"></div>
+      <input id="api" placeholder="http://127.0.0.1:8900">
+      <div style="height:8px"></div>
+      <div class="grid2">
+        <button onclick="saveApi()">Save</button>
+        <button class="primary" onclick="refreshAll()">Scan</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row"><div class="title">System</div><span id="healthBadge" class="badge">UNKNOWN</span></div>
+      <div id="healthMeta" class="meta">Tap Scan.</div>
+    </section>
+
+    <section class="card">
+      <div class="row"><div class="title">Connections</div><span id="connCount" class="badge">0/0</span></div>
+      <div id="connections" class="stack" style="margin-top:10px"></div>
+    </section>
+
+    <section class="card" id="chat">
+      <div class="title">Chat Control</div>
+      <div id="chatlog" class="chatlog" style="margin-top:10px"></div>
+      <div style="height:8px"></div>
+      <textarea id="message" placeholder="Tell Qadir what to do..."></textarea>
+      <div style="height:8px"></div>
+      <div class="quick">
+        <button class="primary" onclick="sendChat()">Send</button>
+        <button onclick="quick('read the newest file on my desktop')">Read newest desktop file</button>
+        <button onclick="quick('summarize what is alive and what is missing')">Summarize status</button>
+        <button onclick="quick('open the ABUZ8 connections dashboard')">Open connections dashboard</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="title">Install On Phone</div>
+      <div class="meta">Android: Chrome menu, Install app. iPhone: Safari Share, Add to Home Screen. For remote control, expose Qadir through Tailscale or an HTTPS tunnel and paste that URL above.</div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const storeKey = 'abuz8.mobile.api';
+    $('api').value = localStorage.getItem(storeKey) || 'http://127.0.0.1:8900';
+
+    function apiBase(){ return $('api').value.replace(/\/+$/,''); }
+    function saveApi(){ localStorage.setItem(storeKey, apiBase()); toast('Saved'); }
+    function toast(text){ $('healthMeta').textContent = text; }
+    function esc(s){ return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    async function getJson(path, ms=7000){
+      const r = await fetch(apiBase() + path, {signal:AbortSignal.timeout(ms)});
+      if (!r.ok) throw new Error(path + ' HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function refreshAll(){
+      saveApi();
+      await Promise.allSettled([loadHealth(), loadConnections()]);
+    }
+
+    async function loadHealth(){
+      try{
+        const h = await getJson('/health', 5000);
+        $('healthBadge').textContent = 'LIVE';
+        $('healthBadge').className = 'badge live';
+        $('healthMeta').textContent = `${h.version || 'Qadir'} ${h.codename || ''} · uptime ${Math.round((h.uptime_sec || 0)/60)} min`;
+      } catch(e){
+        $('healthBadge').textContent = 'OFFLINE';
+        $('healthBadge').className = 'badge';
+        $('healthMeta').textContent = e.message;
+      }
+    }
+
+    async function loadConnections(){
+      const box = $('connections');
+      try{
+        const d = await getJson('/api/connections/discover', 9000);
+        const rows = [];
+        (d.services || []).forEach(s => rows.push({label:s.label, live:!!s.alive, meta:s.actual_url || s.url, action:s.start || s.download || ''}));
+        (d.oauth || []).forEach(p => rows.push({label:p.label, live:!!p.connected, meta:p.connected ? p.method : (p.error || 'connect credentials'), action:p.id === 'google' ? '/api/oauth/google/migrate' : ''}));
+        const live = rows.filter(r => r.live).length;
+        $('connCount').textContent = `${live}/${rows.length}`;
+        $('connCount').className = 'badge ' + (live ? 'live' : '');
+        box.innerHTML = rows.map(r => `<div class="card" style="box-shadow:none;padding:10px"><div class="row"><div class="title">${esc(r.label)}</div><span class="badge ${r.live ? 'live' : ''}">${r.live ? 'LIVE' : 'OPTIONAL'}</span></div><div class="meta">${esc(r.meta)}</div>${r.action ? `<div style="height:8px"></div><button onclick="copy('${esc(r.action)}')">Copy action</button>` : ''}</div>`).join('');
+      } catch(e){
+        box.innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
+      }
+    }
+
+    function addMsg(text, cls){ $('chatlog').insertAdjacentHTML('beforeend', `<div class="msg ${cls}">${esc(text)}</div>`); $('chatlog').scrollTop = $('chatlog').scrollHeight; }
+    function quick(text){ $('message').value = text; sendChat(); }
+
+    async function sendChat(){
+      const text = $('message').value.trim();
+      if (!text) return;
+      $('message').value = '';
+      addMsg(text, 'me');
+      try{
+        const r = await fetch(apiBase() + '/api/chat', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({message:text, soul:'q3', session_id:'mobile-control'}),
+          signal:AbortSignal.timeout(60000)
+        });
+        const j = await r.json();
+        addMsg(j.reply || j.response || JSON.stringify(j, null, 2), 'bot');
+      } catch(e){
+        addMsg(e.message, 'err');
+      }
+    }
+
+    function copy(text){ navigator.clipboard?.writeText(text); toast('Copied'); }
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+    refreshAll();
+  </script>
+</body>
+</html>

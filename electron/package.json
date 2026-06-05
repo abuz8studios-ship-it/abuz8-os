@@ -1,0 +1,82 @@
+{
+  "name": "abuz8-os",
+  "version": "1.0.0",
+  "description": "ABUZ8 OS — Sovereign Desktop",
+  "main": "main.js",
+  "author": "ABUZ8 LLC <ahmad@abuz8ai.com>",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64 -p never",
+    "build:variants": "powershell -ExecutionPolicy Bypass -File scripts/build-brain-variants.ps1",
+    "verify:release": "powershell -ExecutionPolicy Bypass -File scripts/verify-release.ps1"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "ai.abuz8.os",
+    "productName": "ABUZ8 OS",
+    "copyright": "Copyright © 2026 ABUZ8",
+    "directories": {
+      "output": "out",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "portable-core.js",
+      "backends.js",
+      "renderer/index.html",
+      "renderer/manifest.json",
+      "renderer/sw.js",
+      "renderer/mobile.html",
+      "renderer/verify.html",
+      "renderer/specs/**/*",
+      "!renderer/**/*.bak*",
+      "!renderer/__mobile_check.html"
+    ],
+    "extraResources": [
+      {
+        "from": "brain",
+        "to": "brain",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "mcp",
+        "to": "mcp",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "ABUZ8"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ABUZ8 OS",
+      "uninstallDisplayName": "ABUZ8 OS",
+      "license": "build/license.txt"
+    },
+    "portable": {
+      "artifactName": "ABUZ8_OS-${version}-portable.exe"
+    },
+    "asar": true,
+    "compression": "maximum"
+  }
+}
+

@@ -1,0 +1,43 @@
+node_modules/
+electron/out/
+electron/dist/
+electron/*.log
+electron/npm-debug.log*
+electron/yarn-debug.log*
+electron/yarn-error.log*
+tauri/src-tauri/target/
+tauri/dist/*.map
+
+# Local secrets and operator data
+.env
+.env.*
+*.key
+*secret*
+*token*
+credentials/
+bridge/bridge.key
+
+# Generated installers and unpacked apps
+*.exe
+*.blockmap
+*.msi
+*.appx
+win-unpacked/
+release/
+iso/
+vm-tests/
+evidence/
+
+# Large bundled runtime/model binaries are shipped through release assets,
+# not normal Git source history.
+electron/brain/*.gguf
+electron/.brain-shelf/
+electron/mcp/node.exe
+
+# OS/editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+*.tmp
+*.bak
+*.bak*

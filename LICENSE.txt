@@ -1,0 +1,9 @@
+﻿Qadir OS / ABUZ8 OS
+Copyright (c) 2026 ABUZ8 LLC. All rights reserved.
+
+The ABUZ8-authored software in this product is proprietary to ABUZ8 LLC.
+Your use is governed by EULA_COMMERCIAL.txt.
+
+This product also includes third-party open-source software, each under its own
+license. See THIRD_PARTY_NOTICES.txt for the full list and CREDITS.md for attribution.
+The embedded Liquid AI LFM2 model is provided under the LFM Open License v1.0.

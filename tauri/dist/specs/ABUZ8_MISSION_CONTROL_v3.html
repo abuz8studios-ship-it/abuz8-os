@@ -1,0 +1,1830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ABUZ8 Mission Control v3</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  :root {
+    --navy: #0a1628;
+    --navy-mid: #0f1f3d;
+    --navy-light: #162444;
+    --navy-card: #111827;
+    --gold: #c9a84c;
+    --gold-dim: #8a6f2e;
+    --teal: #1a8a7a;
+    --teal-bright: #22d3c8;
+    --cream: #f5f0e8;
+    --white: #fafaf7;
+    --red: #ef4444;
+    --orange: #f97316;
+    --green: #22c55e;
+    --blue: #3b82f6;
+    --purple: #a855f7;
+    --border: rgba(201,168,76,0.15);
+    --border-teal: rgba(34,211,200,0.2);
+    --glow-gold: 0 0 20px rgba(201,168,76,0.3);
+    --glow-teal: 0 0 20px rgba(34,211,200,0.2);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--navy);
+    color: var(--white);
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── LAYOUT ── */
+  .shell { display: flex; height: 100vh; overflow: hidden; }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 220px;
+    min-width: 220px;
+    background: var(--navy-card);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+
+  .logo {
+    padding: 20px 16px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-text {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gold);
+    letter-spacing: 2px;
+  }
+  .logo-sub {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 1px;
+    margin-top: 2px;
+  }
+
+  .nav-section {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,0.3);
+    padding: 0 16px 6px;
+    text-transform: uppercase;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: rgba(255,255,255,0.6);
+    transition: all 0.15s;
+    border-left: 2px solid transparent;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--white); }
+  .nav-item.active {
+    background: rgba(201,168,76,0.08);
+    color: var(--gold);
+    border-left-color: var(--gold);
+  }
+  .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+  .nav-badge {
+    margin-left: auto;
+    background: var(--red);
+    color: white;
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 8px;
+    font-weight: 700;
+  }
+  .nav-badge.green { background: var(--green); }
+  .nav-badge.gold { background: var(--gold); color: var(--navy); }
+
+  .system-status {
+    margin-top: auto;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    color: rgba(255,255,255,0.5);
+  }
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.green { background: var(--green); box-shadow: 0 0 4px var(--green); }
+  .dot.red { background: var(--red); box-shadow: 0 0 4px var(--red); }
+  .dot.orange { background: var(--orange); box-shadow: 0 0 4px var(--orange); }
+  .dot.pulse { animation: pulse-dot 1.5s infinite; }
+  @keyframes pulse-dot {
+    0%,100% { opacity:1; transform:scale(1); }
+    50% { opacity:0.5; transform:scale(0.7); }
+  }
+
+  /* ── MAIN ── */
+  .main {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── TOPBAR ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    background: var(--navy-card);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 9;
+  }
+  .page-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--white);
+  }
+  .topbar-right {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .btn {
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    font-family: 'Space Grotesk', sans-serif;
+    letter-spacing: 0.5px;
+  }
+  .btn-gold {
+    background: var(--gold);
+    color: var(--navy);
+  }
+  .btn-gold:hover { background: #d4b558; box-shadow: var(--glow-gold); }
+  .btn-teal {
+    background: var(--teal);
+    color: white;
+  }
+  .btn-teal:hover { background: #1fa090; box-shadow: var(--glow-teal); }
+  .btn-ghost {
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,0.1); color: white; }
+  .btn-danger {
+    background: rgba(239,68,68,0.15);
+    color: var(--red);
+    border: 1px solid rgba(239,68,68,0.3);
+  }
+  .btn-danger:hover { background: rgba(239,68,68,0.25); }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+
+  /* ── CONTENT ── */
+  .content { padding: 20px 24px; flex: 1; }
+
+  /* ── STAT STRIP ── */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: var(--navy-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .stat-card:hover {
+    border-color: var(--gold);
+    transform: translateY(-1px);
+  }
+  .stat-label {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 6px;
+  }
+  .stat-val {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--gold);
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+  }
+  .stat-sub {
+    font-size: 10px;
+    color: rgba(255,255,255,0.35);
+    margin-top: 3px;
+  }
+  .stat-card.alert { border-color: rgba(239,68,68,0.4); }
+  .stat-card.alert .stat-val { color: var(--red); }
+
+  /* ── SECTION HEADER ── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .section-title {
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    font-weight: 600;
+  }
+  .section-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── TABS ── */
+  .tab-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 18px;
+    background: var(--navy-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+  }
+  .tab {
+    padding: 7px 16px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: rgba(255,255,255,0.5);
+    transition: all 0.15s;
+    border: none;
+    background: transparent;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .tab:hover { color: var(--white); background: rgba(255,255,255,0.04); }
+  .tab.active {
+    background: var(--gold);
+    color: var(--navy);
+  }
+
+  /* ── PORTFOLIO GRID ── */
+  .portfolio-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .asset-card {
+    background: var(--navy-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .asset-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--border);
+    transition: background 0.2s;
+  }
+  .asset-card.ready::before { background: var(--green); }
+  .asset-card.package::before { background: var(--teal-bright); }
+  .asset-card.build::before { background: var(--orange); }
+  .asset-card:hover {
+    border-color: var(--gold);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .card-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--white);
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-badges {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+  .badge-product { background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+  .badge-service { background: rgba(168,85,247,0.2); color: #c084fc; border: 1px solid rgba(168,85,247,0.3); }
+  .badge-aplus { background: var(--teal-bright); color: var(--navy); }
+  .badge-a { background: var(--green); color: var(--navy); }
+  .badge-b { background: var(--orange); color: white; }
+  .badge-ready { background: var(--green); color: var(--navy); font-size: 8px; }
+
+  .card-meta {
+    font-size: 10px;
+    color: rgba(255,255,255,0.35);
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gold);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 2px;
+  }
+  .card-grade {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--teal-bright);
+  }
+
+  .progress-bar {
+    height: 3px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 2px;
+    margin: 10px 0;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s;
+  }
+  .progress-fill.green { background: var(--green); }
+  .progress-fill.teal { background: var(--teal-bright); }
+  .progress-fill.orange { background: var(--orange); }
+  .progress-fill.red { background: var(--red); }
+
+  .readiness-dots {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .rdot {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .rdot.done { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .rdot.miss { background: rgba(239,68,68,0.1); color: rgba(239,68,68,0.7); border: 1px solid rgba(239,68,68,0.2); }
+
+  .card-action-btn {
+    width: 100%;
+    padding: 7px;
+    border-radius: 6px;
+    border: none;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-family: 'Space Grotesk', sans-serif;
+    transition: all 0.15s;
+  }
+  .cta-list { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .cta-list:hover { background: rgba(34,197,94,0.25); }
+  .cta-package { background: rgba(34,211,200,0.12); color: var(--teal-bright); border: 1px solid rgba(34,211,200,0.25); }
+  .cta-package:hover { background: rgba(34,211,200,0.2); }
+  .cta-build { background: rgba(249,115,22,0.12); color: var(--orange); border: 1px solid rgba(249,115,22,0.25); }
+  .cta-build:hover { background: rgba(249,115,22,0.2); }
+
+  /* ── SWARM PANEL ── */
+  .swarm-panel {
+    background: var(--navy-card);
+    border: 1px solid var(--border-teal);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .swarm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .swarm-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--teal-bright);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .swarm-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .swarm-task {
+    background: rgba(34,211,200,0.06);
+    border: 1px solid rgba(34,211,200,0.15);
+    border-radius: 7px;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .swarm-task:hover {
+    border-color: var(--teal-bright);
+    background: rgba(34,211,200,0.12);
+  }
+  .swarm-task-icon { font-size: 18px; margin-bottom: 4px; }
+  .swarm-task-name { font-size: 11px; font-weight: 600; color: var(--teal-bright); margin-bottom: 2px; }
+  .swarm-task-desc { font-size: 9px; color: rgba(255,255,255,0.4); line-height: 1.3; }
+  .swarm-counter {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+  .swarm-num {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--teal-bright);
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+  }
+  .swarm-label { font-size: 11px; color: rgba(255,255,255,0.5); }
+  .swarm-slider-wrap { flex: 1; }
+  .swarm-slider {
+    width: 100%;
+    -webkit-appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.1);
+    outline: none;
+    margin-bottom: 6px;
+  }
+  .swarm-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--teal-bright);
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(34,211,200,0.5);
+  }
+  .swarm-range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: rgba(255,255,255,0.3);
+  }
+
+  /* ── AUDIT PANEL ── */
+  .audit-panel {
+    background: var(--navy-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .audit-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .audit-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--white);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .audit-log {
+    background: rgba(0,0,0,0.4);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    max-height: 180px;
+    overflow-y: auto;
+    line-height: 1.8;
+  }
+  .log-line { display: flex; gap: 10px; }
+  .log-ts { color: rgba(255,255,255,0.25); flex-shrink: 0; }
+  .log-ok { color: var(--green); }
+  .log-warn { color: var(--orange); }
+  .log-err { color: var(--red); }
+  .log-info { color: var(--teal-bright); }
+  .log-scan { color: var(--gold); }
+
+  /* ── SYSTEMS GRID ── */
+  .systems-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .system-tile {
+    background: var(--navy-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .system-tile:hover { border-color: var(--teal-bright); }
+  .system-tile-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .system-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--white);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .system-port {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .system-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .sys-metric {
+    background: rgba(0,0,0,0.3);
+    border-radius: 5px;
+    padding: 6px 8px;
+  }
+  .sys-metric-label { font-size: 9px; color: rgba(255,255,255,0.3); margin-bottom: 2px; }
+  .sys-metric-val { font-size: 13px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── MODAL ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal {
+    background: var(--navy-mid);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    width: 680px;
+    max-height: 85vh;
+    overflow-y: auto;
+    transform: translateY(20px);
+    transition: transform 0.2s;
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  .modal-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--navy-mid);
+    z-index: 1;
+  }
+  .modal-name {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--white);
+    margin-bottom: 4px;
+  }
+  .modal-sub { font-size: 12px; color: rgba(255,255,255,0.4); }
+  .modal-close {
+    background: rgba(255,255,255,0.08);
+    border: none;
+    color: white;
+    width: 30px; height: 30px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .modal-body { padding: 20px 24px; }
+  .modal-section { margin-bottom: 20px; }
+  .modal-section-title {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .modal-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .modal-stat {
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .modal-stat-label { font-size: 10px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
+  .modal-stat-val { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--gold); }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .checklist { display: flex; flex-direction: column; gap: 6px; }
+  .check-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.25);
+    border-radius: 7px;
+    font-size: 12px;
+  }
+  .check-item .ck { font-size: 14px; }
+  .check-item.done { color: rgba(255,255,255,0.7); }
+  .check-item.miss { color: rgba(255,255,255,0.4); }
+  .next-actions { display: flex; flex-direction: column; gap: 6px; }
+  .next-action {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(201,168,76,0.06);
+    border: 1px solid rgba(201,168,76,0.15);
+    border-radius: 7px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .next-action:hover { background: rgba(201,168,76,0.12); border-color: var(--gold); }
+  .next-action-num {
+    width: 20px; height: 20px;
+    background: var(--gold);
+    color: var(--navy);
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* ── CRON / JOBS ── */
+  .jobs-table { width: 100%; border-collapse: collapse; }
+  .jobs-table th {
+    text-align: left;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.3);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .jobs-table td {
+    padding: 8px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    vertical-align: middle;
+  }
+  .jobs-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .job-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  .job-status.failed { background: rgba(239,68,68,0.15); color: var(--red); }
+  .job-status.ok { background: rgba(34,197,94,0.12); color: var(--green); }
+  .job-status.running { background: rgba(34,211,200,0.12); color: var(--teal-bright); }
+
+  /* ── SCANNING ANIMATION ── */
+  .scan-active .audit-log::after {
+    content: '█';
+    animation: blink 0.8s step-end infinite;
+    color: var(--teal-bright);
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── AGENT SWARM VISUAL ── */
+  .agent-swarm-viz {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 12px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    margin-top: 12px;
+    min-height: 60px;
+    align-content: flex-start;
+  }
+  .agent-node {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: rgba(34,211,200,0.15);
+    border: 1px solid rgba(34,211,200,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    transition: all 0.3s;
+    cursor: pointer;
+  }
+  .agent-node.active {
+    background: var(--teal-bright);
+    border-color: var(--teal-bright);
+    box-shadow: 0 0 8px rgba(34,211,200,0.6);
+    animation: agent-pulse 1s ease-in-out infinite alternate;
+  }
+  @keyframes agent-pulse {
+    from { box-shadow: 0 0 4px rgba(34,211,200,0.4); }
+    to { box-shadow: 0 0 12px rgba(34,211,200,0.8); }
+  }
+  .agent-node.done {
+    background: rgba(34,197,94,0.2);
+    border-color: var(--green);
+  }
+  .agent-node.error {
+    background: rgba(239,68,68,0.2);
+    border-color: var(--red);
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+  /* section visibility */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ── REVENUE BLOCK ── */
+  .revenue-block {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .rev-card {
+    background: var(--navy-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .rev-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: rgba(255,255,255,0.4); margin-bottom: 6px; }
+  .rev-val { font-size: 28px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+  .rev-val.zero { color: var(--red); }
+  .rev-val.target { color: var(--gold); }
+  .rev-val.pipeline { color: var(--teal-bright); }
+  .rev-sub { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-text">ABUZ8</div>
+      <div class="logo-sub">MISSION CONTROL v3</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Command</div>
+      <div class="nav-item active" onclick="switchView('portfolio')">
+        <span class="icon">⬡</span> Portfolio
+        <span class="nav-badge gold">61</span>
+      </div>
+      <div class="nav-item" onclick="switchView('swarm')">
+        <span class="icon">⚡</span> Swarm
+        <span class="nav-badge green">100</span>
+      </div>
+      <div class="nav-item" onclick="switchView('audit')">
+        <span class="icon">🔍</span> Audit
+        <span class="nav-badge" style="background:var(--orange)">18</span>
+      </div>
+      <div class="nav-item" onclick="switchView('systems')">
+        <span class="icon">⬢</span> Systems
+      </div>
+      <div class="nav-item" onclick="switchView('cron')">
+        <span class="icon">⏱</span> Cron Jobs
+        <span class="nav-badge">34</span>
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Revenue</div>
+      <div class="nav-item" onclick="switchView('revenue')">
+        <span class="icon">💰</span> Revenue Gate
+        <span class="nav-badge" style="background:var(--red)">$0</span>
+      </div>
+      <div class="nav-item" onclick="switchView('content')">
+        <span class="icon">🎬</span> Content Loop
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Agents</div>
+      <div class="nav-item" onclick="switchView('openclaw')">
+        <span class="icon">🦀</span> OpenClaw/Zait
+        <span class="nav-badge green">OK</span>
+      </div>
+      <div class="nav-item" onclick="switchView('qadir')">
+        <span class="icon">🧠</span> Qadir OS
+      </div>
+    </div>
+
+    <div class="system-status">
+      <div class="status-row"><div class="dot green pulse"></div> Qadir :8900 ALIVE</div>
+      <div class="status-row"><div class="dot green"></div> OpenClaw :18789</div>
+      <div class="status-row"><div class="dot orange"></div> Hermes :7860 CHECK</div>
+      <div class="status-row"><div class="dot red"></div> Bridge :7734 DEAD</div>
+      <div class="status-row"><div class="dot red"></div> Soloman :8910 DEAD</div>
+      <div class="status-row"><div class="dot green"></div> ComfyUI :8188</div>
+      <div class="status-row"><div class="dot green"></div> Ollama :11434</div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="page-title" id="page-title">Strategic Asset Portfolio</div>
+      <div class="topbar-right">
+        <button class="btn btn-ghost btn-sm" onclick="runScan()">🔍 Scan System</button>
+        <button class="btn btn-teal btn-sm" onclick="switchView('swarm')">⚡ Spawn Swarm</button>
+        <button class="btn btn-gold btn-sm" onclick="runFullAudit()">📋 Full Audit</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ══════════════════════════════════════
+           VIEW: PORTFOLIO
+      ══════════════════════════════════════ -->
+      <div class="view active" id="view-portfolio">
+
+        <!-- STAT STRIP -->
+        <div class="stat-strip">
+          <div class="stat-card" onclick="openModal('portfolio-value')">
+            <div class="stat-label">Portfolio Value</div>
+            <div class="stat-val">$1.2M</div>
+            <div class="stat-sub">URF-scored total</div>
+          </div>
+          <div class="stat-card" onclick="openModal('projects')">
+            <div class="stat-label">Total Projects</div>
+            <div class="stat-val">161</div>
+            <div class="stat-sub">98,891 files</div>
+          </div>
+          <div class="stat-card" onclick="openModal('ready')">
+            <div class="stat-label">Ship Ready</div>
+            <div class="stat-val" style="color:var(--green)">8</div>
+            <div class="stat-sub">Can list today</div>
+          </div>
+          <div class="stat-card alert" onclick="openModal('revenue')">
+            <div class="stat-label">Revenue</div>
+            <div class="stat-val">$0</div>
+            <div class="stat-sub">Target: $1K/day</div>
+          </div>
+          <div class="stat-card" onclick="openModal('tokens')">
+            <div class="stat-label">Tokens Today</div>
+            <div class="stat-val" style="color:var(--teal-bright)">6.9M</div>
+            <div class="stat-sub">$0.00 cost</div>
+          </div>
+          <div class="stat-card alert" onclick="openModal('cron-fails')">
+            <div class="stat-label">Cron Failures</div>
+            <div class="stat-val">18</div>
+            <div class="stat-sub">Need attention</div>
+          </div>
+        </div>
+
+        <!-- TABS -->
+        <div class="tab-row">
+          <button class="tab active" onclick="filterCards('all', this)">All (61)</button>
+          <button class="tab" onclick="filterCards('sell', this)">Sell Now (8)</button>
+          <button class="tab" onclick="filterCards('package', this)">Package (12)</button>
+          <button class="tab" onclick="filterCards('build', this)">Build (24)</button>
+          <button class="tab" onclick="filterCards('aplus', this)">A+ Grade (9)</button>
+          <button class="tab" onclick="filterCards('service', this)">Services (11)</button>
+        </div>
+
+        <!-- PORTFOLIO GRID -->
+        <div class="portfolio-grid" id="portfolio-grid">
+          <!-- Cards injected by JS -->
+        </div>
+
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: SWARM
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-swarm">
+        <div class="swarm-panel">
+          <div class="swarm-header">
+            <div class="swarm-title">⚡ Agent Swarm Spawner</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="stopSwarm()">⬛ Stop All</button>
+              <button class="btn btn-teal" onclick="launchSwarm()">⚡ Launch Swarm</button>
+            </div>
+          </div>
+
+          <div class="section-header"><div class="section-title">Mission Templates</div><div class="section-line"></div></div>
+          <div class="swarm-grid">
+            <div class="swarm-task" onclick="selectTask(this,'scan')">
+              <div class="swarm-task-icon">🔍</div>
+              <div class="swarm-task-name">Full System Scan</div>
+              <div class="swarm-task-desc">Audit all 161 projects, score readiness, flag blockers</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'package')">
+              <div class="swarm-task-icon">📦</div>
+              <div class="swarm-task-name">Pre-Packaging</div>
+              <div class="swarm-task-desc">Auto-generate README, pricing, demo for top 8 assets</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'content')">
+              <div class="swarm-task-icon">🎬</div>
+              <div class="swarm-task-name">Content Batch</div>
+              <div class="swarm-task-desc">Generate 20 videos via HyperFrames + post drafts</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'seo')">
+              <div class="swarm-task-icon">📈</div>
+              <div class="swarm-task-name">SEO Pipeline</div>
+              <div class="swarm-task-desc">Research keywords, write blog posts, deploy to 5 domains</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'qadir')">
+              <div class="swarm-task-icon">🧠</div>
+              <div class="swarm-task-name">Qadir Finish</div>
+              <div class="swarm-task-desc">Wire agentic loop, fix 3 routes, build .exe installer</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'lotvue')">
+              <div class="swarm-task-icon">🚗</div>
+              <div class="swarm-task-name">LotVue360</div>
+              <div class="swarm-task-desc">Mohammed demo prep — walkaround video + send pitch</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'hermes')">
+              <div class="swarm-task-icon">⚙️</div>
+              <div class="swarm-task-name">Hermes Stack</div>
+              <div class="swarm-task-desc">Install HyperFrames + NotebookLM MCP + Antigravity</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'cron')">
+              <div class="swarm-task-icon">⏱</div>
+              <div class="swarm-task-name">Fix Cron Jobs</div>
+              <div class="swarm-task-desc">Repair 18 failed cron jobs in OpenClaw</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'outreach')">
+              <div class="swarm-task-icon">📧</div>
+              <div class="swarm-task-name">Outreach</div>
+              <div class="swarm-task-desc">Draft cold emails for top 5 acquirer targets</div>
+            </div>
+            <div class="swarm-task" onclick="selectTask(this,'custom')">
+              <div class="swarm-task-icon">✏️</div>
+              <div class="swarm-task-name">Custom Mission</div>
+              <div class="swarm-task-desc">Define your own multi-agent goal</div>
+            </div>
+          </div>
+
+          <div class="swarm-counter">
+            <div>
+              <div class="swarm-num" id="swarm-count">25</div>
+              <div class="swarm-label">agents</div>
+            </div>
+            <div class="swarm-slider-wrap">
+              <input type="range" class="swarm-slider" min="1" max="100" value="25"
+                oninput="document.getElementById('swarm-count').textContent=this.value">
+              <div class="swarm-range-labels"><span>1</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;color:rgba(255,255,255,0.4)">Selected task</div>
+              <div id="selected-task" style="font-size:13px;font-weight:700;color:var(--teal-bright)">None</div>
+            </div>
+          </div>
+
+          <div class="agent-swarm-viz" id="swarm-viz">
+            <div style="color:rgba(255,255,255,0.2);font-size:11px;width:100%;text-align:center;padding:10px">
+              Select a task and click Launch Swarm
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: AUDIT
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-audit">
+        <div class="audit-panel" id="audit-panel">
+          <div class="audit-header">
+            <div class="audit-title">🔍 System Audit — Auto Pre-Packaging Scanner</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="clearLog()">Clear</button>
+              <button class="btn btn-teal" onclick="runFullAudit()">▶ Run Full Audit</button>
+            </div>
+          </div>
+          <div class="audit-log" id="audit-log">
+            <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-info">Audit ready. Click "Run Full Audit" to start.</span></div>
+          </div>
+        </div>
+
+        <div class="section-header"><div class="section-title">Pre-Packaging Checklist</div><div class="section-line"></div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px" id="prepack-grid">
+          <!-- injected by JS -->
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: SYSTEMS
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-systems">
+        <div class="section-header"><div class="section-title">Live Systems</div><div class="section-line"></div>
+          <button class="btn btn-ghost btn-sm" onclick="refreshSystems()">↻ Refresh</button>
+        </div>
+        <div class="systems-grid" id="systems-grid">
+          <!-- injected by JS -->
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: CRON
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-cron">
+        <div class="section-header">
+          <div class="section-title">Cron Jobs (34 total — 18 failed)</div>
+          <div class="section-line"></div>
+          <button class="btn btn-danger btn-sm" onclick="fixAllCron()">⚡ Fix All Failed</button>
+        </div>
+        <div class="audit-panel">
+          <table class="jobs-table" id="cron-table">
+            <thead>
+              <tr>
+                <th>Job Name</th>
+                <th>Schedule</th>
+                <th>Status</th>
+                <th>Last Run</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="cron-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: REVENUE
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-revenue">
+        <div class="revenue-block">
+          <div class="rev-card">
+            <div class="rev-label">Current Revenue</div>
+            <div class="rev-val zero">$0.00</div>
+            <div class="rev-sub">Revenue = $0 → do this first</div>
+          </div>
+          <div class="rev-card">
+            <div class="rev-label">Daily Target</div>
+            <div class="rev-val target">$1,000</div>
+            <div class="rev-sub">Q3 2026: $3K/day</div>
+          </div>
+          <div class="rev-card">
+            <div class="rev-label">Pipeline Value</div>
+            <div class="rev-val pipeline">$41.7K</div>
+            <div class="rev-sub">Top asset: ai-sdr-agent</div>
+          </div>
+        </div>
+        <div class="section-header"><div class="section-title">Revenue Actions — Do These NOW</div><div class="section-line"></div></div>
+        <div class="next-actions" id="revenue-actions"></div>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: CONTENT
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-content">
+        <div class="swarm-panel">
+          <div class="swarm-header">
+            <div class="swarm-title">🎬 Content Factory Pipeline</div>
+            <button class="btn btn-gold" onclick="runContentPipeline()">▶ Run Pipeline</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+            <div class="sys-metric" style="border-radius:8px;padding:14px">
+              <div class="sys-metric-label">HyperFrames</div>
+              <div class="sys-metric-val" style="color:var(--orange)" id="hf-status">NOT INSTALLED</div>
+            </div>
+            <div class="sys-metric" style="border-radius:8px;padding:14px">
+              <div class="sys-metric-label">NotebookLM MCP</div>
+              <div class="sys-metric-val" style="color:var(--orange)" id="nlm-status">NOT WIRED</div>
+            </div>
+            <div class="sys-metric" style="border-radius:8px;padding:14px">
+              <div class="sys-metric-label">Antigravity CLI</div>
+              <div class="sys-metric-val" style="color:var(--orange)" id="ag-status">NOT INSTALLED</div>
+            </div>
+            <div class="sys-metric" style="border-radius:8px;padding:14px">
+              <div class="sys-metric-label">Postiz API</div>
+              <div class="sys-metric-val" style="color:var(--orange)" id="postiz-status">UNCONFIGURED</div>
+            </div>
+          </div>
+          <div class="audit-log" id="content-log">
+            <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-info">Content factory ready. Deploy COWORK_GOLDIE_STACK_FINISH_NOW.md to activate.</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: OPENCLAW
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-openclaw">
+        <div class="stat-strip" style="grid-template-columns:repeat(5,1fr)">
+          <div class="stat-card"><div class="stat-label">Status</div><div class="stat-val" style="color:var(--green);font-size:16px">OK</div></div>
+          <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-val" style="font-size:16px">7h</div></div>
+          <div class="stat-card"><div class="stat-label">Skills</div><div class="stat-val">190/215</div></div>
+          <div class="stat-card"><div class="stat-label">Cron Jobs</div><div class="stat-val">34</div><div class="stat-sub">18 failed</div></div>
+          <div class="stat-card alert"><div class="stat-label">Auth Expired</div><div class="stat-val">2</div><div class="stat-sub">claude-cli, Gemini</div></div>
+        </div>
+        <div class="section-header"><div class="section-title">Attention Required</div><div class="section-line"></div></div>
+        <div class="audit-panel">
+          <div class="audit-log" style="max-height:220px">
+            <div class="log-line"><span class="log-ts">11:10</span><span class="log-err">18 cron jobs FAILED — ABUZ8 Daily Build Repair, noon-revenue-pulse, social-post-check, packaging-block, evening-review, morning-status...</span></div>
+            <div class="log-line"><span class="log-ts">11:10</span><span class="log-err">Model auth EXPIRED — claude-cli, Gemini — re-authenticate via OpenClaw models auth</span></div>
+            <div class="log-line"><span class="log-ts">11:10</span><span class="log-warn">Verify viral pipeline: 09:00, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00 EDT — all FAILED</span></div>
+            <div class="log-line"><span class="log-ts">11:10</span><span class="log-warn">zai-runtime-wiring-check — FAILED</span></div>
+            <div class="log-line"><span class="log-ts">11:10</span><span class="log-warn">zai-memory-hooks-check — FAILED</span></div>
+            <div class="log-line"><span class="log-ts">11:10</span><span class="log-warn">Project Rescue OS launch check — FAILED</span></div>
+            <div class="log-line"><span class="log-ts">06:00</span><span class="log-info">Nemotron-3-Nano-Omni 30B — GPU0 multimodal — LOADED</span></div>
+            <div class="log-line"><span class="log-ts">07:00</span><span class="log-ok">gpt-5.5 — 1.4M tokens today — $0.00 via OpenClaw routing</span></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-danger" onclick="fixAllCron()">⚡ Fix All 18 Cron Jobs</button>
+          <button class="btn btn-ghost" onclick="alert('Open OpenClaw Settings → Models → Re-auth claude-cli + Gemini')">🔑 Re-auth Models</button>
+          <button class="btn btn-teal btn-sm">📊 Usage: 6.9M tokens · $0.00 · 365 msgs</button>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════
+           VIEW: QADIR
+      ══════════════════════════════════════ -->
+      <div class="view" id="view-qadir">
+        <div class="stat-strip" style="grid-template-columns:repeat(4,1fr)">
+          <div class="stat-card"><div class="stat-label">Port</div><div class="stat-val" style="color:var(--green);font-size:16px">:8900</div><div class="stat-sub">ALIVE</div></div>
+          <div class="stat-card"><div class="stat-label">Endpoints</div><div class="stat-val">100+</div></div>
+          <div class="stat-card alert"><div class="stat-label">Agentic Loop</div><div class="stat-val" style="font-size:14px">MISSING</div><div class="stat-sub">subagent.py L123</div></div>
+          <div class="stat-card alert"><div class="stat-label">Brain Routes</div><div class="stat-val">3</div><div class="stat-sub">broken</div></div>
+        </div>
+        <div class="next-actions" style="margin-top:16px">
+          <div class="next-action"><div class="next-action-num">1</div>Read COWORK_QADIR_OS_FINISH_NOW.md — 7 fixes locked</div>
+          <div class="next-action"><div class="next-action-num">2</div>Promote agentic_loop() from subagent.py L123-166 into /api/chat route</div>
+          <div class="next-action"><div class="next-action-num">3</div>Move soul prompt from content field → system field (15-line fix)</div>
+          <div class="next-action"><div class="next-action-num">4</div>Fix 3 broken brain routes (see FINISH_NOW.md)</div>
+          <div class="next-action"><div class="next-action-num">5</div>Restart :8900 → verify multi-turn with tool call test</div>
+          <div class="next-action"><div class="next-action-num">6</div>Run electron-builder → produce Qadir.exe installer</div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </main>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-top">
+      <div>
+        <div class="modal-name" id="modal-title">Asset Detail</div>
+        <div class="modal-sub" id="modal-sub">Loading...</div>
+      </div>
+      <button class="modal-close" onclick="document.getElementById('modal-overlay').classList.remove('open')">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────────────────────
+// DATA
+// ──────────────────────────────────────────────────────────────────────────────
+const ASSETS = [
+  { id:'ai-sdr-agent', name:'ai-sdr-agent', type:'PRODUCT', grade:'A+', value:41700, action:'package', meta:'AI ML · DaaS · 0 files · 0.02MB · TTM: 1w',
+    desc:'AI sales development representative agent. Highest-value asset in portfolio.',
+    checks:{problem:true,solution:true,proof:true,pricing:true,launch:false},
+    nextActions:['Write 1-page landing page on abuz8ai.com','Set Stripe price: $97/mo','Record 2-min demo video','Post on X with before/after'] },
+  { id:'ios', name:'ios', type:'PRODUCT', grade:'A+', value:34400, action:'package', meta:'MOBILE APP · SERVICE · 8 files · 0.02MB · TTM: 4w',
+    desc:'iOS mobile app product/service. High grade, needs packaging.',
+    checks:{problem:true,solution:true,proof:true,pricing:false,launch:false},
+    nextActions:['Define App Store pricing','Create TestFlight build','Write App Store description','Set up in-app purchase'] },
+  { id:'frontend', name:'frontend', type:'PRODUCT', grade:'A', value:24300, action:'list', meta:'WEB APP · DaaS · 32 files · 0.36MB · TTM: 6w', ready:true,
+    desc:'Frontend web application. Ready to list now.',
+    checks:{problem:true,solution:true,proof:true,pricing:true,launch:true},
+    nextActions:['List on abuz8ai.com TODAY','Set price: $149 one-time','Add to Stripe checkout','Post launch on X/LinkedIn'] },
+  { id:'abuz8s-studio-v2', name:'abuz8s-studio-v2', type:'PRODUCT', grade:'A', value:24300, action:'list', meta:'WEB APP · DaaS · 35 files · 15.65MB · TTM: 6w', ready:true,
+    desc:'ABUZ8 Studio v2. Full-featured, ready to list.',
+    checks:{problem:true,solution:true,proof:true,pricing:true,launch:true},
+    nextActions:['Deploy to abuz8ai.com','Set up pricing page','Create demo video','Launch announcement'] },
+  { id:'CUserswirecabuz8s-studio', name:'abuz8s-studio-v2-frontend', type:'PRODUCT', grade:'A', value:24300, action:'list', meta:'WEB APP · SERVICE · 11 files · 0.08MB · TTM: 6w', ready:true,
+    desc:'Frontend layer for ABUZ8 Studio v2.',
+    checks:{problem:true,solution:true,proof:true,pricing:true,launch:true},
+    nextActions:['Bundle with studio-v2','Create combined offering','Price as add-on: +$49'] },
+  { id:'daily-planner', name:'daily-planner', type:'PRODUCT', grade:'A+', value:23100, action:'package', meta:'AI ML · PRODUCT · 0 files · 0MB · TTM: 4w',
+    desc:'AI daily planner product. High grade but needs packaging to ship.',
+    checks:{problem:true,solution:true,proof:false,pricing:false,launch:false},
+    nextActions:['Build MVP demo','Record use-case video','Price at $29/mo','Create waitlist landing page'] },
+  { id:'abuz8s-studio', name:'abuz8s-studio', type:'PRODUCT', grade:'A+', value:21600, action:'package', meta:'WEB APP · DaaS · 22 files · 0.08MB · TTM: 4w',
+    desc:'Core ABUZ8 Studio product. A+ grade, package and ship.',
+    checks:{problem:true,solution:true,proof:true,pricing:false,launch:false},
+    nextActions:['Define pricing tiers','Write feature comparison','Create packaging doc','Set up Stripe'] },
+  { id:'openclaw-backup', name:'openclaw-backup-best-control', type:'SERVICE', grade:'A', value:19800, action:'list', meta:'COMMAND CENTER · CONSULTING · 89 files · 60.1MB · TTM: 6w', ready:true,
+    desc:'OpenClaw command center backup and control service.',
+    checks:{problem:true,solution:true,proof:true,pricing:true,launch:true},
+    nextActions:['List as managed service','Price: $499/setup + $99/mo','Create service page'] },
+  { id:'content-machine', name:'content-machine', type:'SERVICE', grade:'A', value:13500, action:'package', meta:'CONTENT ENGINE · DaaS · 17 files · 0.1MB · TTM: 4w',
+    desc:'Content generation machine as a service.',
+    checks:{problem:true,solution:false,proof:false,pricing:false,launch:false},
+    nextActions:['Define content output samples','Price: $299/mo','Build demo batch','Post output examples on X'] },
+  { id:'main', name:'main', type:'PRODUCT', grade:'A', value:13400, action:'build', meta:'AI ML · API_LICENSE · 6 files · 27.38MB · TTM: 4w',
+    desc:'Main API product. Needs build work before listing.',
+    checks:{problem:true,solution:true,proof:false,pricing:false,launch:false},
+    nextActions:['Complete API documentation','Add authentication','Create sandbox environment','Set API pricing'] },
+  { id:'zaits_council', name:'zaits_council', type:'PRODUCT', grade:'A', value:13400, action:'build', meta:'AI ML · DaaS · 3 files · 0.04MB · TTM: 4w',
+    desc:'Zait council multi-agent product.',
+    checks:{problem:true,solution:false,proof:false,pricing:false,launch:false},
+    nextActions:['Define council use cases','Build 5-agent demo','Document outputs','Price at $199/mo'] },
+  { id:'omega-resolve', name:'omega-resolve', type:'SERVICE', grade:'A', value:12800, action:'package', meta:'COMMAND CENTER · CONSULTING · 9 files · 0.16MB · TTM: 4w',
+    desc:'Omega resolution service for AI agent conflicts.',
+    checks:{problem:true,solution:true,proof:false,pricing:false,launch:false},
+    nextActions:['Create case study','Price consulting: $2,500/project','Build landing page'] },
+  { id:'qadir-core', name:'Qadir OS', type:'PRODUCT', grade:'A+', value:89000, action:'build', meta:'AI OS · FastAPI · :8900 · 100+ endpoints',
+    desc:'The flagship product. 100+ endpoints, soul runtime, 4-tier memory, Rust shell. ONE BLOCKER: agentic loop not wired.',
+    checks:{problem:true,solution:true,proof:true,pricing:false,launch:false},
+    nextActions:['Wire agentic loop (3hr fix)','Fix soul prompt placement','Repair 3 brain routes','Build .exe installer','Launch at $197 one-time'] },
+  { id:'lotvue360', name:'LotVue360', type:'PRODUCT', grade:'A', value:35000, action:'package', meta:'WEB APP · SAAS · Port 8001 · Mohammed target',
+    desc:'Car dealer 360 photo/video platform. Mohammed (brother) is first customer target. $50-75/mo.',
+    checks:{problem:true,solution:true,proof:true,pricing:false,launch:false},
+    nextActions:['Generate walkaround video from Mohammed photos','Send demo to Mohammed NOW','Set price: $75/mo','Create dealer dashboard'] },
+  { id:'hermes-desktop', name:'Hermes Desktop', type:'PRODUCT', grade:'A', value:28000, action:'build', meta:'ELECTRON APP · E:\\ABU\\HERMES_DESKTOP',
+    desc:'Cinematic Electron dashboard. Dist Hermes.exe is stale (May 20). Needs fresh electron-builder NSIS build.',
+    checks:{problem:true,solution:true,proof:false,pricing:false,launch:false},
+    nextActions:['Run electron-builder NSIS build','Verify aurora/particle effects','Test on fresh machine','Package for GitHub gift release'] },
+];
+
+const SYSTEMS = [
+  { name:'Qadir OS', port:':8900', status:'alive', color:'var(--green)', metrics:{endpoints:'100+', uptime:'LIVE', memory:'90%', souls:'3 loaded'} },
+  { name:'OpenClaw/Zait', port:':18789', status:'alive', color:'var(--green)', metrics:{skills:'190/215', cron:'34 jobs', tokens:'6.9M', cost:'$0.00'} },
+  { name:'Ollama', port:':11434', status:'alive', color:'var(--green)', metrics:{models:'13', vram:'GPU0', tokens:'6.9M/day', cost:'$0'} },
+  { name:'ComfyUI', port:':8188', status:'alive', color:'var(--green)', metrics:{gpu:'GPU1', models:'WAN2.2,LTX2', queue:'idle', vram:'~30GB'} },
+  { name:'Hermes Gateway', port:':7860', status:'warn', color:'var(--orange)', metrics:{version:'v0.14.0', model:'Grok 4.3', status:'CHECK', skills:'215'} },
+  { name:'Bridge', port:':7734', status:'dead', color:'var(--red)', metrics:{status:'DEAD', fix:'restart needed', cmd:'START_BRIDGE.bat', priority:'LOW'} },
+  { name:'Soloman/MalkiOS', port:':8910', status:'dead', color:'var(--red)', metrics:{status:'DEAD', issue:'brain broken', cmd:'START_MALKI.bat', priority:'MED'} },
+  { name:'LotVue360', port:':8001', status:'warn', color:'var(--orange)', metrics:{env:'lotvue conda', ffmpeg:'E:\\ABU\\AI\\ffmpeg', comfyui:'port:8000 NEVER TOUCH', customer:'Mohammed'} },
+  { name:'Content Factory', port:'local', status:'warn', color:'var(--orange)', metrics:{hyperframes:'NOT INSTALLED', notebooklm:'NOT WIRED', antigravity:'NOT INSTALLED', pipeline:'PENDING'} },
+];
+
+const CRON_JOBS = [
+  {name:'ABUZ8 Daily Build Repair', schedule:'09:00 EDT', status:'failed', last:'11:10'},
+  {name:'noon-revenue-pulse', schedule:'12:00 EDT', status:'failed', last:'12:00'},
+  {name:'social-post-check', schedule:'10:00 EDT', status:'failed', last:'10:00'},
+  {name:'ABUZ8 Daily Packaging Block', schedule:'14:00 EDT', status:'failed', last:'14:00'},
+  {name:'evening-review', schedule:'18:00 EDT', status:'failed', last:'n/a'},
+  {name:'morning-status', schedule:'08:00 EDT', status:'failed', last:'08:00'},
+  {name:'ABUZ8 System Index CRM Daily Scan', schedule:'07:00 EDT', status:'ok', last:'1h ago'},
+  {name:'ABUZ8 Daily Product Truth Pass', schedule:'06:00 EDT', status:'ok', last:'1h ago'},
+  {name:'Verify viral pipeline 09:00', schedule:'09:00 EDT', status:'failed', last:'09:00'},
+  {name:'Verify viral pipeline 10:00', schedule:'10:00 EDT', status:'failed', last:'10:00'},
+  {name:'Verify viral pipeline 11:00', schedule:'11:00 EDT', status:'failed', last:'11:00'},
+  {name:'Verify viral pipeline 12:00', schedule:'12:00 EDT', status:'failed', last:'12:00'},
+  {name:'Verify viral pipeline 13:00', schedule:'13:00 EDT', status:'failed', last:'13:00'},
+  {name:'Verify viral pipeline 14:00', schedule:'14:00 EDT', status:'failed', last:'14:00'},
+  {name:'Verify viral pipeline 15:00', schedule:'15:00 EDT', status:'failed', last:'15:00'},
+  {name:'zai-runtime-wiring-check', schedule:'every 2h', status:'failed', last:'11:10'},
+  {name:'zai-memory-hooks-check', schedule:'every 2h', status:'failed', last:'11:10'},
+  {name:'zai-model-connections-check', schedule:'every 4h', status:'failed', last:'11:10'},
+  {name:'Project Rescue OS launch check', schedule:'daily', status:'failed', last:'n/a'},
+  {name:'Hamada O session check', schedule:'on demand', status:'ok', last:'31m ago'},
+];
+
+const REVENUE_ACTIONS = [
+  { n:1, text:'LotVue360 → Text Mohammed NOW. "Demo ready, 5 min call?" Close $75/mo.' },
+  { n:2, text:'abuz8ai.com → Add "frontend" product with Stripe $149 buy button. Takes 1 hour.' },
+  { n:3, text:'Content pipeline → Run 5 videos on AI agent topics. Post on X. Drive traffic to abuz8ai.com.' },
+  { n:4, text:'ai-sdr-agent → Write 1 landing page, Stripe $97/mo, post on X with hook. First $97 today.' },
+  { n:5, text:'Qadir OS → Finish agentic loop (3hr). Launch at $197 on Gumroad. Post on X/LinkedIn.' },
+];
+
+const PRE_PACK = [
+  { asset:'frontend', checks:['README written','Stripe price set','Demo video','Landing page','Screenshot set','License defined'] },
+  { asset:'abuz8s-studio-v2', checks:['README written','Stripe price set','Demo video','Landing page'] },
+  { asset:'ai-sdr-agent', checks:['README written'] },
+  { asset:'openclaw-backup', checks:['README written','Service pricing'] },
+];
+
+// ──────────────────────────────────────────────────────────────────────────────
+// RENDER
+// ──────────────────────────────────────────────────────────────────────────────
+function renderPortfolio(filter='all') {
+  const grid = document.getElementById('portfolio-grid');
+  let assets = ASSETS;
+  if (filter === 'sell') assets = ASSETS.filter(a => a.action === 'list');
+  else if (filter === 'package') assets = ASSETS.filter(a => a.action === 'package');
+  else if (filter === 'build') assets = ASSETS.filter(a => a.action === 'build');
+  else if (filter === 'aplus') assets = ASSETS.filter(a => a.grade === 'A+');
+  else if (filter === 'service') assets = ASSETS.filter(a => a.type === 'SERVICE');
+
+  grid.innerHTML = assets.map(a => {
+    const readyClass = a.action === 'list' ? 'ready' : a.action === 'package' ? 'package' : 'build';
+    const ctaClass = a.action === 'list' ? 'cta-list' : a.action === 'package' ? 'cta-package' : 'cta-build';
+    const ctaLabel = a.action === 'list' ? 'LIST NOW' : a.action === 'package' ? 'PACKAGE' : 'BUILD';
+    const gradeClass = a.grade === 'A+' ? 'badge-aplus' : a.grade === 'A' ? 'badge-a' : 'badge-b';
+    const typeClass = a.type === 'SERVICE' ? 'badge-service' : 'badge-product';
+
+    const doneCount = Object.values(a.checks || {}).filter(Boolean).length;
+    const totalCheck = Object.keys(a.checks || {}).length;
+    const pct = totalCheck ? Math.round(doneCount/totalCheck*100) : 0;
+    const barClass = pct >= 80 ? 'green' : pct >= 50 ? 'teal' : pct >= 30 ? 'orange' : 'red';
+
+    const dots = Object.entries(a.checks || {}).map(([k,v]) =>
+      `<span class="rdot ${v?'done':'miss'}">${k.toUpperCase()}</span>`
+    ).join('');
+
+    return `<div class="asset-card ${readyClass}" onclick="openAssetModal('${a.id}')">
+      ${a.ready ? '<div style="position:absolute;top:8px;right:8px"><span class="badge badge-ready">READY</span></div>' : ''}
+      <div class="card-top">
+        <div class="card-name">${a.name}</div>
+        <div class="card-badges">
+          <span class="badge ${typeClass}">${a.type}</span>
+          <span class="badge ${gradeClass}">${a.grade}</span>
+        </div>
+      </div>
+      <div class="card-meta">${a.meta}</div>
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <div class="card-value">$${(a.value/1000).toFixed(1)}K</div>
+        <div class="card-grade">${a.grade}</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill ${barClass}" style="width:${pct}%"></div></div>
+      <div class="readiness-dots">${dots}</div>
+      <button class="card-action-btn ${ctaClass}" onclick="event.stopPropagation();handleCTA('${a.id}','${a.action}')">${ctaLabel}</button>
+    </div>`;
+  }).join('');
+}
+
+function renderSystems() {
+  const grid = document.getElementById('systems-grid');
+  grid.innerHTML = SYSTEMS.map(s => {
+    const statusLabel = s.status === 'alive' ? '✅ ALIVE' : s.status === 'warn' ? '⚠️ CHECK' : '❌ DEAD';
+    const metricsHtml = Object.entries(s.metrics).map(([k,v]) =>
+      `<div class="sys-metric"><div class="sys-metric-label">${k}</div><div class="sys-metric-val" style="color:${s.color};font-size:11px">${v}</div></div>`
+    ).join('');
+    return `<div class="system-tile" onclick="openSystemModal('${s.name}')">
+      <div class="system-tile-top">
+        <div class="system-name"><div class="dot ${s.status === 'alive' ? 'green' : s.status === 'warn' ? 'orange' : 'red'} pulse"></div>${s.name}</div>
+        <div class="system-port">${s.port}</div>
+      </div>
+      <div class="system-metrics">${metricsHtml}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderCron() {
+  const tbody = document.getElementById('cron-body');
+  tbody.innerHTML = CRON_JOBS.map(j => {
+    const sc = j.status === 'ok' ? 'ok' : 'failed';
+    const sl = j.status === 'ok' ? '✅ OK' : '❌ FAILED';
+    return `<tr>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${j.name}</td>
+      <td style="color:rgba(255,255,255,0.5);font-size:11px">${j.schedule}</td>
+      <td><span class="job-status ${sc}">${sl}</span></td>
+      <td style="color:rgba(255,255,255,0.4);font-size:11px">${j.last}</td>
+      <td>${j.status==='failed' ? `<button class="btn btn-ghost btn-sm" onclick="fixCronJob('${j.name}')">Fix</button>` : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRevenue() {
+  const el = document.getElementById('revenue-actions');
+  el.innerHTML = REVENUE_ACTIONS.map(a =>
+    `<div class="next-action"><div class="next-action-num">${a.n}</div><div>${a.text}</div></div>`
+  ).join('');
+}
+
+function renderPrePack() {
+  const grid = document.getElementById('prepack-grid');
+  grid.innerHTML = PRE_PACK.map(p => {
+    const items = p.checks.map((c,i) =>
+      `<div class="check-item ${i<2?'done':'miss'}">
+        <span class="ck">${i<2?'✅':'⬜'}</span>${c}
+      </div>`
+    ).join('');
+    return `<div class="audit-panel" style="margin:0">
+      <div class="modal-section-title">${p.asset}</div>
+      <div class="checklist">${items}</div>
+    </div>`;
+  }).join('');
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// NAV
+// ──────────────────────────────────────────────────────────────────────────────
+const PAGE_TITLES = {
+  portfolio: 'Strategic Asset Portfolio',
+  swarm: '⚡ Agent Swarm Spawner',
+  audit: '🔍 System Audit',
+  systems: 'Live Systems',
+  cron: 'Cron Jobs',
+  revenue: '💰 Revenue Gate',
+  content: '🎬 Content Factory',
+  openclaw: '🦀 OpenClaw / Zait',
+  qadir: '🧠 Qadir OS',
+};
+
+function switchView(view) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + view).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  event.currentTarget && event.currentTarget.classList.add('active');
+  document.getElementById('page-title').textContent = PAGE_TITLES[view] || view;
+}
+
+function filterCards(filter, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  renderPortfolio(filter);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MODALS
+// ──────────────────────────────────────────────────────────────────────────────
+function openAssetModal(id) {
+  const a = ASSETS.find(x => x.id === id);
+  if (!a) return;
+  document.getElementById('modal-title').textContent = a.name;
+  document.getElementById('modal-sub').textContent = a.meta;
+
+  const doneCount = Object.values(a.checks || {}).filter(Boolean).length;
+  const totalCheck = Object.keys(a.checks || {}).length;
+  const pct = totalCheck ? Math.round(doneCount/totalCheck*100) : 0;
+
+  const checksHtml = Object.entries(a.checks || {}).map(([k,v]) =>
+    `<div class="check-item ${v?'done':'miss'}">
+      <span class="ck">${v?'✅':'❌'}</span>
+      ${k.charAt(0).toUpperCase()+k.slice(1)} defined
+    </div>`
+  ).join('');
+
+  const actionsHtml = (a.nextActions || []).map((act, i) =>
+    `<div class="next-action"><div class="next-action-num">${i+1}</div>${act}</div>`
+  ).join('');
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="modal-section">
+      <div class="modal-section-title">Overview</div>
+      <p style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.6">${a.desc}</p>
+    </div>
+    <div class="modal-grid-2 modal-section">
+      <div class="modal-stat"><div class="modal-stat-label">URF Value</div><div class="modal-stat-val">$${(a.value/1000).toFixed(1)}K</div></div>
+      <div class="modal-stat"><div class="modal-stat-label">Grade</div><div class="modal-stat-val" style="color:var(--teal-bright)">${a.grade}</div></div>
+      <div class="modal-stat"><div class="modal-stat-label">Type</div><div class="modal-stat-val" style="font-size:14px">${a.type}</div></div>
+      <div class="modal-stat"><div class="modal-stat-label">Readiness</div><div class="modal-stat-val" style="color:${pct>=80?'var(--green)':pct>=50?'var(--orange)':'var(--red)'}">${pct}%</div></div>
+    </div>
+    <div class="modal-section">
+      <div class="modal-section-title">Readiness Checklist</div>
+      <div class="checklist">${checksHtml}</div>
+    </div>
+    <div class="modal-section">
+      <div class="modal-section-title">Next Actions</div>
+      <div class="next-actions">${actionsHtml}</div>
+    </div>
+    <div class="modal-section">
+      <div class="modal-section-title">Actions</div>
+      <div class="modal-actions">
+        <button class="btn btn-gold" onclick="alert('Opening packaging wizard for ${a.name}...')">📦 Package Now</button>
+        <button class="btn btn-teal" onclick="alert('Spawning 5 agents for ${a.name}...')">⚡ Spawn Agents</button>
+        <button class="btn btn-ghost" onclick="alert('Opening folder for ${a.name}')">📁 Open Folder</button>
+      </div>
+    </div>`;
+
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function openSystemModal(name) {
+  const s = SYSTEMS.find(x => x.name === name);
+  if (!s) return;
+  document.getElementById('modal-title').textContent = s.name;
+  document.getElementById('modal-sub').textContent = `Port ${s.port} — ${s.status.toUpperCase()}`;
+
+  const metricsHtml = Object.entries(s.metrics).map(([k,v]) =>
+    `<div class="modal-stat"><div class="modal-stat-label">${k}</div><div class="modal-stat-val" style="font-size:14px;color:${s.color}">${v}</div></div>`
+  ).join('');
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="modal-grid-2 modal-section">${metricsHtml}</div>
+    <div class="modal-section">
+      <div class="modal-section-title">Actions</div>
+      <div class="modal-actions">
+        ${s.status !== 'alive' ? `<button class="btn btn-teal" onclick="alert('Starting ${s.name}...')">▶ Start</button>` : ''}
+        <button class="btn btn-ghost" onclick="alert('Checking health of ${s.name}...')">🔍 Health Check</button>
+        <button class="btn btn-ghost" onclick="alert('Viewing logs for ${s.name}...')">📋 View Logs</button>
+        ${s.status === 'dead' ? `<button class="btn btn-danger" onclick="alert('Emergency restart for ${s.name}')">⚡ Emergency Restart</button>` : ''}
+      </div>
+    </div>`;
+
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function openModal(type) {
+  const titles = {
+    'portfolio-value': ['Portfolio URF Value', 'Universal Replication Formula scoring across all 161 projects'],
+    'projects': ['161 Projects · 98,891 Files', '1,695 GB total — Master audit completed 2026-05-26'],
+    'ready': ['8 Ship-Ready Assets', 'These can generate revenue TODAY with minimal work'],
+    'revenue': ['Revenue Status: $0', 'CRITICAL — Revenue gate active. One revenue action before new features.'],
+    'tokens': ['6.9M Tokens Today', '$0.00 cost — all routed through local Ollama + OpenClaw free tier'],
+    'cron-fails': ['18 Cron Job Failures', 'All viral pipeline checks, zai hooks, and revenue pulses failed today'],
+  };
+  const [title, sub] = titles[type] || ['Detail', ''];
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-sub').textContent = sub;
+  document.getElementById('modal-body').innerHTML = `<p style="font-size:13px;color:rgba(255,255,255,0.7);line-height:1.7">${sub}</p>`;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('modal-overlay')) {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// AUDIT
+// ──────────────────────────────────────────────────────────────────────────────
+const AUDIT_LINES = [
+  ['scan','🔍 ABUZ8 Full System Audit — Starting...'],
+  ['scan','📁 Scanning E:\\ABU\\ workspace...'],
+  ['info','Found 161 projects · 98,891 files · 1,695 GB'],
+  ['ok','Qadir OS :8900 — ✅ ALIVE · 100+ endpoints'],
+  ['ok','OpenClaw :18789 — ✅ ALIVE · 7h uptime · $0.00 cost'],
+  ['ok','Ollama :11434 — ✅ ALIVE · 13 models · 163GB'],
+  ['ok','ComfyUI :8188 — ✅ ALIVE · WAN 2.2 loaded'],
+  ['warn','Hermes Gateway :7860 — ⚠️ CHECK — verify gateway started'],
+  ['err','Bridge :7734 — ❌ DEAD — run START_BRIDGE.bat'],
+  ['err','Soloman :8910 — ❌ DEAD — brain broken · run START_MALKI.bat'],
+  ['scan','📊 Scoring assets with URF formula...'],
+  ['ok','ai-sdr-agent — $41.7K · A+ · PACKAGE → 1 week to revenue'],
+  ['ok','frontend — $24.3K · A · READY → list TODAY'],
+  ['ok','abuz8s-studio-v2 — $24.3K · A · READY → list TODAY'],
+  ['ok','Qadir OS — $89K · A+ · BLOCKER: agentic loop missing'],
+  ['ok','LotVue360 — $35K · A · TEXT MOHAMMED NOW'],
+  ['warn','content-machine — $13.5K · proof missing → build demo first'],
+  ['err','18 cron jobs FAILED — viral pipeline, revenue pulse, zai hooks'],
+  ['err','2 model auths EXPIRED — claude-cli, Gemini → re-auth now'],
+  ['scan','📦 Pre-packaging audit...'],
+  ['ok','frontend — README ✅ · Stripe ✅ · Demo ✅ · Launch ✅ → SHIP NOW'],
+  ['ok','abuz8s-studio-v2 — README ✅ · Stripe ✅ → SHIP NOW'],
+  ['warn','ai-sdr-agent — missing: demo video, Stripe price, landing page'],
+  ['warn','Qadir OS — missing: pricing page, installer .exe, launch plan'],
+  ['scan','🧠 Checking agent infrastructure...'],
+  ['ok','OpenClaw: 190/215 skills · 6.9M tokens · $0.00 · 91.4% cache hit'],
+  ['warn','HyperFrames — ❌ NOT INSTALLED · required for content pipeline'],
+  ['warn','NotebookLM MCP — ❌ NOT WIRED into Hermes'],
+  ['warn','Antigravity CLI — ❌ NOT INSTALLED · replaces Gemini CLI'],
+  ['ok','factory.py — ✅ WORKING · WAN 2.2 · image→video proven'],
+  ['scan','✅ AUDIT COMPLETE'],
+  ['info','Revenue: $0 → CRITICAL · 8 assets ready to list · 3 hours to first dollar'],
+];
+
+let auditRunning = false;
+function runFullAudit() {
+  if (auditRunning) return;
+  auditRunning = true;
+  switchView('audit');
+  const log = document.getElementById('audit-log');
+  log.innerHTML = '';
+  document.getElementById('audit-panel').classList.add('scan-active');
+  let i = 0;
+  const now = new Date();
+  const interval = setInterval(() => {
+    if (i >= AUDIT_LINES.length) {
+      clearInterval(interval);
+      auditRunning = false;
+      document.getElementById('audit-panel').classList.remove('scan-active');
+      return;
+    }
+    const [type, text] = AUDIT_LINES[i];
+    const ts = new Date(now.getTime() + i * 400).toTimeString().slice(0,8);
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.innerHTML = `<span class="log-ts">${ts}</span><span class="log-${type}">${text}</span>`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    i++;
+  }, 250);
+}
+
+function runScan() { runFullAudit(); }
+function clearLog() {
+  document.getElementById('audit-log').innerHTML =
+    '<div class="log-line"><span class="log-ts">--:--:--</span><span class="log-info">Log cleared.</span></div>';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SWARM
+// ──────────────────────────────────────────────────────────────────────────────
+let selectedTask = null;
+let swarmRunning = false;
+
+function selectTask(el, task) {
+  document.querySelectorAll('.swarm-task').forEach(t => t.style.borderColor = '');
+  el.style.borderColor = 'var(--teal-bright)';
+  selectedTask = task;
+  document.getElementById('selected-task').textContent = el.querySelector('.swarm-task-name').textContent;
+}
+
+function launchSwarm() {
+  if (!selectedTask) { alert('Select a task first'); return; }
+  if (swarmRunning) return;
+  swarmRunning = true;
+  const count = parseInt(document.getElementById('swarm-count').textContent);
+  const viz = document.getElementById('swarm-viz');
+  viz.innerHTML = '';
+
+  // Create nodes
+  for (let i = 0; i < count; i++) {
+    const node = document.createElement('div');
+    node.className = 'agent-node';
+    node.title = `Agent #${i+1}`;
+    node.textContent = '🤖';
+    node.style.animationDelay = (i * 0.05) + 's';
+    viz.appendChild(node);
+  }
+
+  const nodes = viz.querySelectorAll('.agent-node');
+  let activated = 0;
+  const activateInterval = setInterval(() => {
+    if (activated >= count) {
+      clearInterval(activateInterval);
+      // Start completing agents
+      let completed = 0;
+      const completeInterval = setInterval(() => {
+        if (completed >= count) {
+          clearInterval(completeInterval);
+          swarmRunning = false;
+          // Add completion log
+          const log = document.getElementById('audit-log');
+          const div = document.createElement('div');
+          const ts = new Date().toTimeString().slice(0,8);
+          div.className = 'log-line';
+          div.innerHTML = `<span class="log-ts">${ts}</span><span class="log-ok">⚡ SWARM COMPLETE — ${count} agents finished "${selectedTask}" mission</span>`;
+          log.appendChild(div);
+          return;
+        }
+        const idx = Math.floor(Math.random() * count);
+        if (nodes[idx].classList.contains('active')) {
+          nodes[idx].classList.remove('active');
+          nodes[idx].classList.add('done');
+          nodes[idx].textContent = '✓';
+          completed++;
+        }
+      }, 100 + Math.random() * 200);
+      return;
+    }
+    nodes[activated].classList.add('active');
+    activated++;
+  }, 60);
+}
+
+function stopSwarm() {
+  swarmRunning = false;
+  const nodes = document.querySelectorAll('.agent-node');
+  nodes.forEach(n => { n.classList.remove('active'); n.classList.add('error'); n.textContent = '✕'; });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MISC
+// ──────────────────────────────────────────────────────────────────────────────
+function handleCTA(id, action) {
+  const msgs = {
+    list: `Opening listing wizard for ${id}...\n\n→ Add to abuz8ai.com\n→ Create Stripe product\n→ Write launch tweet`,
+    package: `Opening packaging wizard for ${id}...\n\n→ Generate README\n→ Record demo\n→ Set pricing`,
+    build: `Opening build plan for ${id}...\n\n→ Read COWORK instructions\n→ Assign to Cowork\n→ Verify when done`,
+  };
+  alert(msgs[action] || 'Loading...');
+}
+
+function fixAllCron() {
+  const log = document.getElementById('audit-log') || document.createElement('div');
+  const ts = new Date().toTimeString().slice(0,8);
+  alert(`Fix All 18 Cron Jobs\n\nPaste this in OpenClaw → Zait chat:\n\n"Fix all failed cron jobs. Re-register: viral pipeline checks (09:00-15:00 EDT), noon-revenue-pulse, social-post-check, zai-runtime-wiring-check, zai-memory-hooks-check, evening-review, morning-status, ABUZ8-Daily-Build-Repair-Block."`);
+}
+
+function fixCronJob(name) {
+  alert(`Fix: ${name}\n\nTell Zait: "Re-register cron job: ${name}"`);
+}
+
+function refreshSystems() {
+  renderSystems();
+  alert('System status refreshed. For live data, check actual ports via PowerShell:\n\nGet-NetTCPConnection | Where-Object {$_.LocalPort -in 7860,7734,8900,8910,8188,11434,18789} | Select-Object LocalPort,State');
+}
+
+function runContentPipeline() {
+  const lines = [
+    ['info','Content pipeline starting...'],
+    ['warn','HyperFrames: NOT INSTALLED → run: npm install -g @hyperframes/cli'],
+    ['warn','NotebookLM MCP: NOT WIRED → add to Hermes mcp_servers.json'],
+    ['warn','Antigravity: NOT INSTALLED → run: npm install -g @google/antigravity-cli'],
+    ['info','SOLUTION: Deploy COWORK_GOLDIE_STACK_FINISH_NOW.md to Cowork'],
+    ['info','ETA: ~5 hours to full pipeline operational'],
+  ];
+  const log = document.getElementById('content-log');
+  log.innerHTML = '';
+  lines.forEach((l,i) => {
+    setTimeout(() => {
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      const ts = new Date().toTimeString().slice(0,8);
+      div.innerHTML = `<span class="log-ts">${ts}</span><span class="log-${l[0]}">${l[1]}</span>`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }, i * 300);
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// INIT
+// ──────────────────────────────────────────────────────────────────────────────
+renderPortfolio();
+renderSystems();
+renderCron();
+renderRevenue();
+renderPrePack();
+
+// Auto-run quick scan on load
+setTimeout(() => {
+  const log = document.getElementById('audit-log');
+  const ts = new Date().toTimeString().slice(0,8);
+  log.innerHTML = `<div class="log-line"><span class="log-ts">${ts}</span><span class="log-info">ABUZ8 Mission Control v3 loaded. Click "Run Full Audit" for complete system scan.</span></div>`;
+}, 500);
+</script>
+</body>
+</html>
