@@ -1799,12 +1799,12 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
                     </div>
                     <div class="cw-voice-card" data-voice="qadir-tts">
                       <div class="cw-vc-icon">⚛</div>
-                      <div><b>Qadir TTS</b><div class="cw-vc-sub">Generic sovereign voice · always available</div></div>
+                      <div><b>Qadir TTS</b><div class="cw-vc-sub">Native Windows voice · bundled fallback</div></div>
                       <span class="ts-badge live">LIVE</span>
                     </div>
                     <div class="cw-voice-card" data-voice="browser-tts">
                       <div class="cw-vc-icon">🔊</div>
-                      <div><b>Browser TTS</b><div class="cw-vc-sub">Native Web Speech · works offline</div></div>
+                      <div><b>Browser TTS</b><div class="cw-vc-sub">Web Speech fallback · device voices</div></div>
                       <span class="ts-badge live">LIVE</span>
                     </div>
                     <div class="cw-voice-card" data-voice="record-fresh">
@@ -3056,7 +3056,7 @@ const KINGDOM = [
   ]},
   { cat: 'AI Surfaces', items: [
     { i: '🧠', n: 'Memory L1–L4 + R1', s: 'live' },
-    { i: '🎙', n: 'Voice (TTS + ASR)', s: 'live' },
+    { i: '🎙', n: 'Voice (native TTS + browser STT)', s: 'live' },
     { i: '🎨', n: 'ComfyUI Pipeline', s: 'live' },
     { i: '🎬', n: 'Lipsync Avatar', s: 'live' },
     { i: '🎵', n: 'Music + SFX Gen', s: 'live' },
@@ -3392,35 +3392,56 @@ if(window.speechSynthesis){
 
 /* ── SENTENCE-BOUNDARY TTS CHUNKER ───────────────────────────────── */
 let _ttsBuf='';
-function osSpeakChunk(buf){try{const m=buf.match(/^([\s\S]*?[.!?…:][)"'\]]?\s)/);if(m){const s=m[1].replace(/[#*`>_~]/g,'').trim();if(s&&window.speechSynthesis){const u=new SpeechSynthesisUtterance(s);if(selectedVoice)u.voice=selectedVoice;u.rate=1.05;u.pitch=1.0;speechSynthesis.speak(u);}return buf.slice(m[1].length);}return buf;}catch{return buf;}}
+let nativeTtsQueue = Promise.resolve();
+function browserSpeakText(text){
+  if (!text || !('speechSynthesis' in window)) return false;
+  const u = new SpeechSynthesisUtterance(text);
+  if (selectedVoice) u.voice = selectedVoice;
+  u.rate = 1.05; u.pitch = 1.0; u.volume = 1;
+  speechSynthesis.speak(u);
+  return true;
+}
+function nativeSpeakText(text){
+  const clean = (text || '').replace(/[#*`>_~]/g,'').trim();
+  if (!clean) return Promise.resolve(false);
+  nativeTtsQueue = nativeTtsQueue.then(async () => {
+    try {
+      const r = await fetch('http://localhost:8900/api/tts', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text: clean, voice:'qadir' })
+      });
+      if (!r.ok || !String(r.headers.get('content-type') || '').includes('audio/')) throw new Error('native tts unavailable');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      await new Promise((resolve) => {
+        const a = new Audio(url);
+        a.onended = a.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+        a.play().catch(() => { URL.revokeObjectURL(url); browserSpeakText(clean); resolve(); });
+      });
+      return true;
+    } catch {
+      browserSpeakText(clean);
+      return false;
+    }
+  });
+  return nativeTtsQueue;
+}
+function osSpeakChunk(buf){try{const m=buf.match(/^([\s\S]*?[.!?…:][)"'\]]?\s)/);if(m){const s=m[1].replace(/[#*`>_~]/g,'').trim();if(s)nativeSpeakText(s);return buf.slice(m[1].length);}return buf;}catch{return buf;}}
 
 function avatarSpeak(text){
-  if (avatarSpeaking) return speechSynthesis.cancel();
+  if (avatarSpeaking) { try{speechSynthesis.cancel();}catch{} avatarSpeaking=false; return; }
   text = text || prompt('Speak what?', 'Bismillah. ABUZ8 OS online. Sovereign brain alive.');
   if (!text) return;
-  // Also notify backend avatar/speak (fire-and-forget)
-  if (AGENTS.qadir.wired) {
-    fetch('http://localhost:8900/api/avatar/speak', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ text, voice:'qadir' })
-    }).catch(()=>{});
-  }
-  if (!('speechSynthesis' in window)) return toast('Browser TTS unavailable');
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.05; u.pitch = 1.0; u.volume = 1;
-  if (selectedVoice) u.voice = selectedVoice;
   document.getElementById('avatar-svg').classList.add('speaking');
   setAvatarStatus('speaking…');
   avatarSpeaking = true;
   animateMouth(true);
-  u.onend = () => {
+  nativeSpeakText(text).finally(() => {
     avatarSpeaking = false;
     document.getElementById('avatar-svg').classList.remove('speaking');
     setAvatarStatus('idle · listening');
     animateMouth(false);
-  };
-  u.onerror = u.onend;
-  speechSynthesis.speak(u);
+  });
 }
 
 function animateMouth(on){
@@ -6086,7 +6107,7 @@ function mgDeploy(key, btn){
 /* ================================================================
    CREATOR STUDIO — IG + TikTok content pipeline
    ================================================================ */
-let cwStep = 0, cwState = { voice:'ahmad-clone', avatar:'ahmad-clone' };
+let cwStep = 0, cwState = { voice:'qadir-tts', avatar:'local-avatar' };
 let cwJobs = [], cwPosted = [];
 
 function initCreatorStudio(){
@@ -6190,7 +6211,7 @@ function cwPreviewVoice(){
     u.pitch = parseFloat(document.getElementById('cw-pitch').value);
     speechSynthesis.speak(u);
     toast('🔊 Browser TTS preview');
-  } else if (cwState.voice === 'ahmad-clone' || cwState.voice === 'qadir-tts'){
+  } else if (cwState.voice === 'recorded-local' || cwState.voice === 'qadir-tts'){
     // Try Qadir TTS
     if (AGENTS.qadir.wired){
       fetch('http://localhost:8900/api/avatar/speak', {

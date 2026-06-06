@@ -14,6 +14,11 @@ and the core tool dispatcher run on the user's machine.
 - Embedded llama.cpp/LFM brain on `127.0.0.1:8902`
 - One embedded model: `LFM2-2.6B-Exp-Q4_K_M.gguf`
 - Local memory and mission/Kanban board
+- Native Windows TTS endpoint (`/api/tts`) using the bundled local API and the
+  buyer's installed Windows voices
+- Streaming chat speech: responses are spoken sentence-by-sentence through
+  native TTS with browser TTS fallback
+- Browser microphone/STT controls for supported Chromium/Edge environments
 - MCP bridge for Claude Desktop
 - Docker Desktop MCP import when Docker exposes `docker mcp`
 - Model download plumbing for user-approved local GGUF downloads
@@ -89,10 +94,15 @@ data folder and checks:
 - exactly one embedded GGUF model
 - device probe from the current machine
 - local memory and mission board
+- native Windows TTS returning WAV audio
 - Claude Desktop MCP bridge
 - tool dispatcher consent gates
 - action tools by observed OS side effects
 - cleanup after verification
+
+Native offline STT is not bundled in this package yet. Full offline STT should
+be added with a packaged recognizer such as Whisper before advertising
+"offline native STT."
 
 ## Contact
 

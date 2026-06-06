@@ -41,6 +41,39 @@ function Try-CoreJson {
   }
 }
 
+function Invoke-CoreBinary {
+  param(
+    [string]$Method,
+    [string]$Path,
+    [object]$Body = $null,
+    [int]$TimeoutSec = 30
+  )
+  $params = @{
+    Uri = "http://127.0.0.1:8900$Path"
+    Method = $Method
+    UseBasicParsing = $true
+    TimeoutSec = $TimeoutSec
+  }
+  if ($null -ne $Body) {
+    $params.ContentType = "application/json"
+    $params.Body = ($Body | ConvertTo-Json -Depth 12)
+  }
+  $tmp = Join-Path $env:TEMP ("abuz8-bin-{0}.dat" -f ([guid]::NewGuid().ToString("N")))
+  try {
+    $params.OutFile = $tmp
+    $resp = Invoke-WebRequest @params
+    $contentType = ""
+    try { $contentType = [string]$resp.Headers["Content-Type"] } catch {}
+    return [pscustomobject]@{
+      StatusCode = [int]$resp.StatusCode
+      ContentType = $contentType
+      Bytes = [byte[]][System.IO.File]::ReadAllBytes($tmp)
+    }
+  } finally {
+    Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Stop-CorePorts {
   $owners = Get-NetTCPConnection -LocalPort 8900,8902 -State Listen -ErrorAction SilentlyContinue |
     Select-Object -ExpandProperty OwningProcess -Unique
@@ -324,6 +357,17 @@ foreach ($v in $variantsToRun) {
     $actionTools = Test-ActionTools -VariantName $v.Name
     $brainSelect = Invoke-CoreJson -Method POST -Path "/api/brains/select" -Body @{ brain = $v.Brain } -TimeoutSec 20
     $toolsList = Invoke-CoreJson -Method GET -Path "/api/tools/list" -TimeoutSec 20
+    $voiceStatus = Invoke-CoreJson -Method GET -Path "/api/voice/status" -TimeoutSec 20
+    $ttsAudio = Invoke-CoreBinary -Method POST -Path "/api/tts" -Body @{ text = "ABUZ8 native TTS release verification."; voice = "" } -TimeoutSec 40
+    $ttsHeader = if ($ttsAudio.Bytes.Length -ge 12) {
+      [System.Text.Encoding]::ASCII.GetString($ttsAudio.Bytes[0..3]) + "/" + [System.Text.Encoding]::ASCII.GetString($ttsAudio.Bytes[8..11])
+    } else { "" }
+    $nativeTtsAvailable = ([string]$voiceStatus.native_tts).ToLowerInvariant() -eq "true"
+    $nativeTtsPass = (
+      ($nativeTtsAvailable -eq $true) -and
+      ($ttsHeader -eq "RIFF/WAVE") -and
+      ($ttsAudio.Bytes.Length -gt 1000)
+    )
 
     $mcpTools = @()
     if ($v.Name -eq "pro" -or $v.Name -eq "consumer-pro-2.6b") {
@@ -354,6 +398,7 @@ foreach ($v in $variantsToRun) {
       ($toolCreate.ok -eq $true) -and
       ($toolCall.ok -eq $true) -and
       ($actionTools.AllPass -eq $true) -and
+      ($nativeTtsPass -eq $true) -and
       ($brainSelect.ok -eq $true) -and
       (@($toolsList.tools).Count -gt 0) -and
       ([string]$gateCli -match "403|allow_cli")
@@ -374,6 +419,17 @@ foreach ($v in $variantsToRun) {
       ToolCreated = $toolCreate.ok
       ToolCallWorked = $toolCall.ok
       ActionTools = $actionTools
+      NativeTts = [pscustomobject]@{
+        Pass = $nativeTtsPass
+        Available = $nativeTtsAvailable
+        StatusCode = $ttsAudio.StatusCode
+        Engine = $voiceStatus.native_tts_engine
+        NativeStt = $voiceStatus.native_stt
+        BrowserStt = $voiceStatus.browser_stt
+        Voices = @($voiceStatus.voices)
+        AudioBytes = $ttsAudio.Bytes.Length
+        Header = $ttsHeader
+      }
       BrainSelectWorked = $brainSelect.ok
       ToolsCount = @($toolsList.tools).Count
       PermissionGateChecked = ([string]$gateCli -match "403|allow_cli")

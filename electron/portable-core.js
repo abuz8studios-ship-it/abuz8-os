@@ -513,6 +513,17 @@ function text(res, status, body, type = 'text/plain; charset=utf-8') {
   res.end(body);
 }
 
+function binary(res, status, body, type = 'application/octet-stream') {
+  res.writeHead(status, {
+    'content-type': type,
+    'content-length': body.length,
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'content-type'
+  });
+  res.end(body);
+}
+
 function getBody(req) {
   return new Promise((resolve) => {
     let body = '';
@@ -531,6 +542,58 @@ function getBody(req) {
 function splitPath(reqUrl) {
   const u = new URL(reqUrl, `http://127.0.0.1:${PORT}`);
   return { pathname: u.pathname.replace(/\/+$/, '') || '/', searchParams: u.searchParams };
+}
+
+function synthesizeWindowsTts(textValue, voiceName = '') {
+  return new Promise((resolve, reject) => {
+    if (process.platform !== 'win32') return reject(new Error('Native TTS is only bundled for Windows in this build.'));
+    const textClean = String(textValue || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
+    if (!textClean) return reject(new Error('No text supplied.'));
+    const ttsDir = safeMkdir(path.join(dataRoot, 'cache', 'tts'));
+    const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const inputFile = path.join(ttsDir, `${id}.txt`);
+    const outputFile = path.join(ttsDir, `${id}.wav`);
+    fs.writeFileSync(inputFile, textClean, 'utf8');
+    const scriptBody = [
+      'param([string]$InputFile,[string]$OutputFile,[string]$VoiceName)',
+      'Add-Type -AssemblyName System.Speech',
+      '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+      'if ($VoiceName) { try { $synth.SelectVoice($VoiceName) } catch {} }',
+      '$synth.Rate = 0',
+      '$synth.Volume = 100',
+      '$synth.SetOutputToWaveFile($OutputFile)',
+      '$synth.Speak([IO.File]::ReadAllText($InputFile))',
+      '$synth.Dispose()'
+    ].join('; ');
+    const script = `& { ${scriptBody} }`;
+    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, inputFile, outputFile, String(voiceName || '')], { windowsHide: true, timeout: 30000 }, (err) => {
+      try { fs.unlinkSync(inputFile); } catch {}
+      if (err) return reject(err);
+      try {
+        const wav = fs.readFileSync(outputFile);
+        try { fs.unlinkSync(outputFile); } catch {}
+        resolve(wav);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+function listWindowsTtsVoices() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve([]);
+    const script = [
+      'Add-Type -AssemblyName System.Speech',
+      '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+      '$synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }',
+      '$synth.Dispose()'
+    ].join('; ');
+    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 10000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      resolve(String(stdout || '').split(/\r?\n/).map((v) => v.trim()).filter(Boolean));
+    });
+  });
 }
 
 function mcpConfigPath() {
@@ -1513,8 +1576,42 @@ async function route(req, res) {
     jobs.unshift(job);
     return json(res, 200, { ok: true, job, mode: 'local-fallback' });
   }
-  if (pathname === '/api/avatar/speak') return json(res, 200, { ok: true, queued: false, fallback: 'browser-tts' });
-  if (pathname === '/api/avatar/health') return json(res, 200, { ok: true, mode: 'browser-tts-fallback' });
+  if (pathname === '/api/voice/status' || pathname === '/api/tts/status') {
+    const voices = await listWindowsTtsVoices();
+    return json(res, 200, {
+      ok: true,
+      native_tts: process.platform === 'win32' && voices.length > 0,
+      native_tts_engine: process.platform === 'win32' ? 'Windows System.Speech/SAPI' : null,
+      native_stt: false,
+      browser_stt: true,
+      browser_tts: true,
+      streaming_chat_tts: true,
+      voices,
+      note: 'This build bundles native Windows TTS through the OS speech engine. Offline native STT requires a bundled recognizer such as Whisper and is not included yet.'
+    });
+  }
+  if (pathname === '/api/tts' || pathname === '/api/tts/stream') {
+    const body = await getBody(req);
+    try {
+      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '');
+      return binary(res, 200, wav, 'audio/wav');
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message, fallback: 'browser-tts' });
+    }
+  }
+  if (pathname === '/api/avatar/speak') {
+    const body = await getBody(req);
+    try {
+      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '');
+      return binary(res, 200, wav, 'audio/wav');
+    } catch (e) {
+      return json(res, 200, { ok: true, queued: false, fallback: 'browser-tts', error: e.message });
+    }
+  }
+  if (pathname === '/api/avatar/health') {
+    const voices = await listWindowsTtsVoices();
+    return json(res, 200, { ok: true, mode: voices.length ? 'native-windows-tts' : 'browser-tts-fallback', voices });
+  }
   if (pathname === '/api/routing/leaderboard') return json(res, 200, { ok: true, rows: [{ lane: 'portable-core', n_calls: readMemory(500).length, mean_success: 1, cost_per_1k: 0 }] });
   if (pathname === '/api/provenance/stats') return json(res, 200, { ok: true, fact_count: readMemory(1000).length, agent_count: 1, open_conflicts: 0 });
   if (pathname === '/api/security/integrity' || pathname === '/api/security/audit') return json(res, 200, { ok: true, message: 'Portable runtime folders and local API are reachable.', data_root: dataRoot });
