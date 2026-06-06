@@ -33,6 +33,7 @@
   --mono:'JetBrains Mono',Consolas,monospace;
 }
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text2);font-family:var(--font);font-size:12.5px;line-height:1.5}
+body{display:flex;align-items:flex-start;justify-content:center}
 button{cursor:pointer;font-family:inherit}
 input,textarea,select{font-family:inherit;color:inherit}
 ::-webkit-scrollbar{width:5px;height:5px}
@@ -56,10 +57,11 @@ body:after{content:"";position:fixed;inset:0;z-index:-5;opacity:.22;pointer-even
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ───────── OS SHELL — topbar / main / dock ───────── */
-.os{display:grid;grid-template-rows:52px 1fr 52px;height:100vh;width:100vw}
+.os{display:grid;grid-template-rows:52px 1fr 52px;height:100vh;width:100vw;transform:scale(var(--ui-zoom,1));transform-origin:top center}
+body.ui-scaled .os{width:calc(100vw / var(--ui-zoom,1));height:calc(100vh / var(--ui-zoom,1))}
 
 /* ===== TOP BAR ===== */
-.topbar{display:grid;grid-template-columns:200px 1fr 300px;gap:14px;align-items:center;padding:6px 14px 0}
+.topbar{display:grid;grid-template-columns:260px 1fr 380px;gap:14px;align-items:center;padding:6px 14px 0}
 .brand{display:flex;align-items:center;gap:12px}
 .seal{width:40px;height:40px;border:1px solid var(--line);border-radius:14px;display:grid;place-items:center;font:900 22px var(--serif);color:var(--gold2);background:radial-gradient(circle at 30% 22%,rgba(255,255,255,.22),transparent 36%),linear-gradient(145deg,rgba(25,224,173,.34),rgba(0,0,0,.4));box-shadow:0 0 30px rgba(25,224,173,.18),inset 0 0 22px rgba(255,255,255,.04)}
 .brand h1{font:900 17px/1 var(--serif);color:var(--gold2);letter-spacing:.4px}
@@ -72,6 +74,10 @@ body:after{content:"";position:fixed;inset:0;z-index:-5;opacity:.22;pointer-even
 .command kbd{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);border-radius:7px;padding:4px 7px;color:#dce8e4;font:11px var(--mono)}
 
 .status-row{display:flex;justify-content:flex-end;align-items:center;gap:12px;color:var(--text3);font-size:11.5px}
+.zoom-controls{display:flex;align-items:center;gap:4px;border:1px solid var(--border);border-radius:10px;background:rgba(4,12,17,.55);padding:3px}
+.zoom-controls button{width:24px;height:24px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--gold2);font:800 11px var(--mono);display:grid;place-items:center}
+.zoom-controls button:hover{border-color:var(--emerald);color:var(--emerald2);background:rgba(25,224,173,.08)}
+#zoom-label{min-width:38px;text-align:center;color:var(--text3);font:700 9px var(--mono)}
 .status-block b{display:block;color:var(--emerald);font:800 10px var(--mono);letter-spacing:.12em;margin-top:2px}
 .clock{font:600 13px var(--mono);color:var(--gold2);text-align:right}
 .clock small{display:block;font:600 9px var(--mono);color:var(--text3);letter-spacing:.14em;margin-top:2px;text-transform:uppercase}
@@ -1018,6 +1024,12 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
       <div class="clock">
         <span id="clock-time">—</span>
         <small id="clock-date">—</small>
+      </div>
+      <div class="zoom-controls" title="UI zoom for this device">
+        <button onclick="uiZoom(-0.05)" title="Zoom out">−</button>
+        <span id="zoom-label">100%</span>
+        <button onclick="uiZoom(0.05)" title="Zoom in">+</button>
+        <button onclick="uiZoom(0,true)" title="Reset zoom">1×</button>
       </div>
       <button class="pandora-toggle" onclick="togglePandora()" title="Pandora · Avatar Edition (James Cameron cinematic)" id="pandora-btn" style="display:none">✦</button>
       <button class="pro-toggle" onclick="toggleProMode()" title="Pro Mode (enterprise skin)" id="pro-toggle-btn">PRO</button>
@@ -2151,6 +2163,21 @@ let sessionId = 'abuz8os-' + Date.now();
 let streaming = false;
 let toolCalls = [];
 
+let currentZoom = Number(localStorage.getItem('abuz8_ui_zoom') || '1') || 1;
+function applyUiZoom(){
+  currentZoom = Math.max(0.8, Math.min(1.2, currentZoom));
+  document.documentElement.style.setProperty('--ui-zoom', currentZoom.toFixed(2));
+  document.body.classList.toggle('ui-scaled', Math.abs(currentZoom - 1) > 0.001);
+  const label = document.getElementById('zoom-label');
+  if (label) label.textContent = Math.round(currentZoom * 100) + '%';
+}
+function uiZoom(delta, reset=false){
+  currentZoom = reset ? 1 : currentZoom + delta;
+  currentZoom = Math.max(0.8, Math.min(1.2, currentZoom));
+  localStorage.setItem('abuz8_ui_zoom', currentZoom.toFixed(2));
+  applyUiZoom();
+}
+
 /* Clean-machine guard: optional local connectors are tested manually, not probed loudly on launch. */
 const OPTIONAL_PROBE_PORTS = new Set(['3000','5173','7734','8000','8001','8002','8042','8188','8910','9119','11434','1234','18789']);
 const nativeFetch = window.fetch.bind(window);
@@ -2168,6 +2195,8 @@ window.fetch = function(input, init){
   } catch {}
   return nativeFetch(input, init);
 };
+
+applyUiZoom();
 
 /* ── CLOCK ───────────────────────────────────────────────────────── */
 function tick(){
