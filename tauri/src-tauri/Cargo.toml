@@ -2,7 +2,7 @@
 name = "abuz8-os"
 version = "1.0.0"
 description = "ABUZ8 OS - Sovereign Desktop"
-authors = ["Ahmad Abu Zait <abuz8studios@gmail.com>"]
+authors = ["ABUZ8 LLC <support@abuz8ai.com>"]
 edition = "2021"
 rust-version = "1.77"
 

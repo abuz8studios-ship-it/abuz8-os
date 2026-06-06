@@ -8,8 +8,11 @@ Copyright (c) 2026 ABUZ8 LLC (Ohio, USA).
    software ("Qadir OS") for personal or commercial purposes, including running your
    own business operations.
 
-2. ONE-TIME PURCHASE. Your purchase is a one-time payment. No subscription. Updates,
-   if provided, are at ABUZ8's discretion.
+2. LOCAL SOFTWARE PURCHASE. Your purchase includes the local ABUZ8 OS Consumer
+   Pro software and bundled local 2.6B brain. Optional cloud brains, hosted
+   models, provider APIs, OAuth connectors, support plans, and future hosted
+   services may require separate user-owned credentials, provider accounts, or
+   monthly subscriptions.
 
 3. RESTRICTIONS. You may not resell, redistribute, sublicense, or repackage the
    ABUZ8-authored software as your own product. You may use its outputs freely.
@@ -37,4 +40,4 @@ Copyright (c) 2026 ABUZ8 LLC (Ohio, USA).
 
 10. GOVERNING LAW. This Agreement is governed by the laws of the State of Ohio, USA.
 
-Contact: ABUZ8 LLC - ahmad@abuz8ai.com
+Contact: ABUZ8 LLC - support@abuz8ai.com

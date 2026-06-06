@@ -35,12 +35,12 @@ For 3-year deals: prices drop ~30%. SSL.com regularly runs $179 for 3-yr OV.
 
 ## What you need to provide (OV validation)
 
-The CA verifies you ARE who you say you are. For ABUZ8 LLC:
+The CA verifies the publishing organization.
 
-1. **Business documents** — Ohio Articles of Organization (you have these, EIN 41-5161931)
+1. **Business documents** — articles of organization/incorporation and tax records
 2. **Phone verification** — they call a number on your business listing. Make sure ABUZ8 LLC has a verifiable D-U-N-S number or is in a business directory (D&B, ZoomInfo, LinkedIn Company Page). If not, get a D-U-N-S — free, 30 days at dnb.com.
-3. **Physical address** — the LLC's registered Ohio address
-4. **Authorized contact** — you (Ahmad, manager/owner)
+3. **Physical address** — the registered business address
+4. **Authorized contact** — a verified company manager/officer
 
 **Pro tip:** Get your LinkedIn Company Page + D-U-N-S squared away **before** ordering the cert. CA validation hangs on these checks 80% of the time. With both ready, OV validation finishes in 24 hours.
 
@@ -71,7 +71,7 @@ The CA verifies you ARE who you say you are. For ABUZ8 LLC:
    ```powershell
    $pwd = ConvertTo-SecureString -String "REPLACE_WITH_STRONG_PWD" -Force -AsPlainText
    Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -match 'ABUZ8' } |
-     Export-PfxCertificate -FilePath "C:\Users\wirec\Documents\abuz8-signing.pfx" -Password $pwd
+     Export-PfxCertificate -FilePath "$env:USERPROFILE\Documents\abuz8-signing.pfx" -Password $pwd
    ```
 7. **Back up** the .pfx to an encrypted USB + a password manager (Bitwarden, 1Password). If you lose it AND the password, you lose a year of cert reputation.
 
@@ -80,8 +80,8 @@ The CA verifies you ARE who you say you are. For ABUZ8 LLC:
 Once the .pfx is on disk:
 
 ```powershell
-cd E:\ABU\ABUZ8_OS_DIST
-.\sign-bundle.ps1 -CertPath "C:\Users\wirec\Documents\abuz8-signing.pfx" -CertPassword (Read-Host -AsSecureString "PFX password")
+cd <repo-root>
+.\sign-bundle.ps1 -CertPath "$env:USERPROFILE\Documents\abuz8-signing.pfx" -CertPassword (Read-Host -AsSecureString "PFX password")
 ```
 
 Both artifacts are signed + timestamped in ~5 seconds. The script:

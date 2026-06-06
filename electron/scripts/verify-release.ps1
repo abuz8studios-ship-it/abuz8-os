@@ -1,6 +1,6 @@
 param(
   [string]$VariantDir = "$PSScriptRoot\..\out\variants",
-  [string]$OutputDir = "E:\output\abuz8-release-verify",
+  [string]$OutputDir = (Join-Path $PSScriptRoot "..\out\release-verify"),
   [string[]]$Variants = @("lite", "standard", "pro")
 )
 
@@ -215,12 +215,12 @@ function Test-ActionTools {
   $shotRecent = $shotInfo -and $shotInfo.Length -gt 0 -and $shotInfo.LastWriteTime -gt (Get-Date).AddSeconds(-10)
   if ($shotExists) {
     Remove-Item -LiteralPath $shotFile -Force -ErrorAction SilentlyContinue
-    $cleanup += "screenshot $shotFile deleted"
+    $cleanup += "screenshot artifact deleted"
   }
   $proof.screenshot = New-ToolProof `
     -Pass:($shot.Ok -and $shotRecent) `
     -Reason $(if ($shot.Ok) { "PNG exists, size > 0, mtime within 10s" } else { $shot.Error }) `
-    -Observed @{ file = $shotFile; bytes = $(if ($shotInfo) { $shotInfo.Length } else { 0 }); recent = [bool]$shotRecent } `
+    -Observed @{ artifact = $(if ($shotFile) { Split-Path -Leaf $shotFile } else { "" }); bytes = $(if ($shotInfo) { $shotInfo.Length } else { 0 }); recent = [bool]$shotRecent } `
     -Cleaned:($shotExists -and !(Test-Path -LiteralPath $shotFile))
 
   $content = "ABUZ8_ACTION_FILE_WRITE_$VariantName"
@@ -234,12 +234,12 @@ function Test-ActionTools {
   if ($writeFile -and (Test-Path -LiteralPath $writeFile)) {
     $writeExact = ((Get-Content -LiteralPath $writeFile -Raw) -eq $content)
     Remove-Item -LiteralPath $writeFile -Force -ErrorAction SilentlyContinue
-    $cleanup += "file_write $writeFile deleted"
+    $cleanup += "file_write artifact deleted"
   }
   $proof.file_write = New-ToolProof `
     -Pass:($write.Ok -and $writeExact) `
     -Reason $(if ($write.Ok) { "file exists with exact content" } else { $write.Error }) `
-    -Observed @{ file = $writeFile; exact_content = $writeExact } `
+    -Observed @{ artifact = $(if ($writeFile) { Split-Path -Leaf $writeFile } else { "" }); exact_content = $writeExact } `
     -Cleaned:($writeFile -and !(Test-Path -LiteralPath $writeFile))
 
   $hostCall = Try-CoreJson -Method POST -Path "/api/tools/call" -Body @{
@@ -255,7 +255,7 @@ function Test-ActionTools {
   $proof.shell_run = New-ToolProof `
     -Pass:($hostCall.Ok -and $hostStdout.Trim() -match [regex]::Escape($hostToken) -and !$blockedShell.Ok) `
     -Reason $(if ($hostCall.Ok) { "hostname stdout contains machine name and disallowed command is blocked" } else { $hostCall.Error }) `
-    -Observed @{ stdout = $hostStdout.Trim(); expected_token = $hostToken; denied_command_blocked = !$blockedShell.Ok; denied_error = $blockedShell.Error } `
+    -Observed @{ host_matched = ($hostStdout.Trim() -match [regex]::Escape($hostToken)); denied_command_blocked = !$blockedShell.Ok; denied_error = $blockedShell.Error } `
     -Cleaned $true
 
   $escape = Try-CoreJson -Method POST -Path "/api/tools/call" -Body @{

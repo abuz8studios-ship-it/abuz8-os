@@ -985,14 +985,14 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
         <p id="brand-sub">Sovereign · Mach 3</p>
       </div>
       <div class="org-switcher" onclick="toggleOrgMenu(event)">
-        <span class="org-cur" id="org-cur">Ahmad · Personal</span>
+        <span class="org-cur" id="org-cur">Personal Workspace</span>
         <span class="org-caret">▾</span>
         <div class="org-menu" id="org-menu">
-          <div class="org-item on" data-org="personal" onclick="setOrg('personal','Ahmad · Personal')">
-            <span class="org-dot"></span><span>Ahmad · Personal</span><span class="org-tag">FREE</span>
+          <div class="org-item on" data-org="personal" onclick="setOrg('personal','Personal Workspace')">
+            <span class="org-dot"></span><span>Personal Workspace</span><span class="org-tag">LOCAL</span>
           </div>
-          <div class="org-item" data-org="abuz8" onclick="setOrg('abuz8','ABUZ8 LLC')">
-            <span class="org-dot"></span><span>ABUZ8 LLC · Ohio</span><span class="org-tag">PRO</span>
+          <div class="org-item" data-org="team" onclick="setOrg('team','Team Workspace')">
+            <span class="org-dot"></span><span>Team Workspace</span><span class="org-tag">PRO</span>
           </div>
           <div class="org-item" data-org="goldman" onclick="setOrg('goldman','Goldman Sachs Demo')" style="display:none">
             <span class="org-dot"></span><span>Goldman Sachs (demo)</span><span class="org-tag">ENT</span>
@@ -1316,17 +1316,8 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
             </div>
           </div>
 
-          <div class="section-head" style="margin-top:18px">
-            <span class="section-title">Executive Dashboards · Bundled</span>
-            <div class="section-line"></div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-            <a class="qbtn" href="specs/ABUZ8_MASTER_PORTFOLIO.html" target="_blank">Open Master Portfolio ↗</a>
-            <a class="qbtn" href="specs/ABUZ8_MISSION_CONTROL_v3.html" target="_blank">Open Mission Control v3 ↗</a>
-          </div>
-
           <div class="section-head">
-            <span class="section-title">Portfolio · 8 Sovereign Assets</span>
+            <span class="section-title">Workspace Assets</span>
             <div class="section-line"></div>
             <span class="section-action" style="opacity:0.5;cursor:default">+ Add Asset · soon</span>
           </div>
@@ -1801,10 +1792,10 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
                 <div>
                   <label>Voice source</label>
                   <div id="cw-voice-list">
-                    <div class="cw-voice-card on" data-voice="ahmad-clone">
+                    <div class="cw-voice-card on" data-voice="recorded-local">
                       <div class="cw-vc-icon">🎙</div>
-                      <div><b>Ahmad (cloned)</b><div class="cw-vc-sub">Trained via Avatar Studio · 60s sample</div></div>
-                      <span class="ts-badge live">CLONED</span>
+                      <div><b>Your recorded voice</b><div class="cw-vc-sub">Local sample · never uploaded without consent</div></div>
+                      <span class="ts-badge live">LOCAL</span>
                     </div>
                     <div class="cw-voice-card" data-voice="qadir-tts">
                       <div class="cw-vc-icon">⚛</div>
@@ -1854,9 +1845,9 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
                 <div>
                   <label>Avatar (cloned face)</label>
                   <div id="cw-avatar-list">
-                    <div class="cw-voice-card on" data-avatar="ahmad-clone">
+                    <div class="cw-voice-card on" data-avatar="local-avatar">
                       <div class="cw-vc-icon" style="background:linear-gradient(135deg,#d8b65f,#19e0ad)">👤</div>
-                      <div><b>Ahmad (cloned)</b><div class="cw-vc-sub">Trained in Avatar Studio</div></div>
+                      <div><b>Your local avatar</b><div class="cw-vc-sub">Created from user-provided media</div></div>
                       <span class="ts-badge live">READY</span>
                     </div>
                     <div class="cw-voice-card" data-avatar="qadir-symbol">
@@ -2058,7 +2049,7 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
     <div class="studio-step on" data-step="0">
       <div class="studio-h">Record 60s of your voice</div>
       <div class="studio-p">Read this passage clearly. The system extracts your timbre, pitch range, prosody, and resonant frequencies. Stored locally · never uploaded without consent.</div>
-      <div class="studio-script">"Bismillah. I am Ahmad Abu Zait, founder of ABUZ8. I built this system to free my voice across machines — so when I speak, it is truly me, not an imitation. The numbers count: one, two, three, four, five, six, seven, eight, nine, ten."</div>
+      <div class="studio-script">"This is my local voice sample for ABUZ8 OS. I consent to storing this sample on this computer for local testing. The numbers count: one, two, three, four, five, six, seven, eight, nine, ten."</div>
       <div class="studio-mic">
         <button class="studio-rec" onclick="studioRec()" id="studio-rec-btn">● Record</button>
         <div class="studio-meter"><div class="studio-meter-bar" id="studio-meter"></div></div>
@@ -2805,7 +2796,7 @@ async function sendOne(brainKey, cleanText, rawText){
   const c = CONN[brainKey];
 
   // Mirror user message to this brain's Telegram (fire-and-forget)
-  tgMirror(brainKey, 'Ahmad → ' + ag.label, rawText);
+  tgMirror(brainKey, 'User → ' + ag.label, rawText);
 
   // Add AI bubble tagged with brain identity
   const aiEl = appendMsgBrain(brainKey, ag);
@@ -3773,7 +3764,7 @@ function setOrg(key, label){
 function newOrg(){ toast('New workspace · contact sales@abuz8ai.com'); }
 // init current org label
 setTimeout(() => {
-  const labels = { personal: 'Ahmad · Personal', abuz8: 'ABUZ8 LLC', goldman: 'Goldman Sachs Demo', pfizer: 'Pfizer R&D Demo' };
+  const labels = { personal: 'Personal Workspace', team: 'Team Workspace', goldman: 'Enterprise Demo', pfizer: 'Research Demo' };
   const cur = document.getElementById('org-cur');
   if (cur && labels[currentOrg]) cur.textContent = labels[currentOrg];
   document.querySelectorAll('.org-item').forEach(it => it.classList.toggle('on', it.dataset.org === currentOrg));
@@ -3796,7 +3787,7 @@ const SKILLS = [
   { id:'voice-clone',   icon:'🎙', name:'Voice Clone Studio',   author:'abuz8',         desc:'Train your voice from 60s sample. Lipsync-ready output.',    price:99,   rating:4.9, installs:'1.4k',  installed:false, tags:['paid','mine'] },
   { id:'soc2-export',   icon:'🛡', name:'SOC2 Auto-Report',     author:'abuz8',         desc:'Generate SOC2 Type II PDF from audit chain. Quarterly.',     price:299,  rating:5.0, installs:'87',    installed:false, tags:['paid','mine'] },
   { id:'octave-mem',    icon:'🧠', name:'Octave Memory',        author:'community',     desc:'Pitch-class binning for harmonic memory association.',       price:0,    rating:4.3, installs:'620',   installed:false, tags:['free'] },
-  { id:'ar-overlay',    icon:'📐', name:'AR Spatial Overlay',   author:'wirec-labs',    desc:'Project agent UI over real-world objects (WebXR).',          price:39,   rating:4.2, installs:'412',   installed:false, tags:['paid'] },
+  { id:'ar-overlay',    icon:'📐', name:'AR Spatial Overlay',   author:'community',     desc:'Project agent UI over real-world objects (WebXR).',          price:39,   rating:4.2, installs:'412',   installed:false, tags:['paid'] },
   { id:'court-prep',    icon:'⚖',  name:'Legal Brief Drafter',  author:'community',     desc:'IRAC-format brief generation. Citation checking.',           price:79,   rating:4.6, installs:'1.1k',  installed:false, tags:['paid'] },
   { id:'health-vitals', icon:'❤',  name:'Vital Signs Watch',    author:'community',     desc:'HR/HRV/SpO2 from Apple Watch + Fitbit ingestion.',           price:0,    rating:4.5, installs:'3.4k',  installed:false, tags:['free'] }
 ];
@@ -4445,14 +4436,10 @@ loadMemories = async function(){
   // Sample fallback so the UI demonstrates salience even without backend
   if (!arr || !arr.length){
     arr = [
-      { content:'Ahmad lives in Ohio · ABUZ8 LLC · EIN 41-5161931',                  category:'identity',  timestamp: new Date(Date.now() - 3600_000*72).toISOString() },
-      { content:'GPU0 is display GPU · LLMs there run 5-30 tok/s. GPU1 = compute.', category:'hardware',  timestamp: new Date(Date.now() - 3600_000*12).toISOString() },
-      { content:'Stripe 3-tier billing wired · checkout at /api/billing/checkout',  category:'product',   timestamp: new Date(Date.now() - 3600_000*4).toISOString() },
-      { content:'Mission: $1T banked → fund mosques, schools, water across Sahara', category:'mission',   timestamp: new Date(Date.now() - 3600_000*168).toISOString() },
-      { content:'Qadir Core enterprise sells for $10K–$80K per deployment',         category:'revenue',   timestamp: new Date(Date.now() - 3600_000*8).toISOString() },
-      { content:'Photosensitivity: light UI for work, dark cinematic for public',    category:'design',    timestamp: new Date(Date.now() - 3600_000*48).toISOString() },
-      { content:'Never delete working code without backing it up first',             category:'doctrine',  timestamp: new Date(Date.now() - 3600_000*96).toISOString() },
-      { content:'14-item OS fusion delivered with end-to-end verification',          category:'session',   timestamp: new Date(Date.now() - 60_000).toISOString() }
+      { content:'This device was probed on first launch and local readiness was saved.', category:'device', timestamp: new Date(Date.now() - 3600_000*4).toISOString() },
+      { content:'The bundled 2.6B local brain works without internet or a home server.', category:'brain', timestamp: new Date(Date.now() - 3600_000*3).toISOString() },
+      { content:'Mission board tasks are stored locally on this computer.', category:'mission', timestamp: new Date(Date.now() - 3600_000*2).toISOString() },
+      { content:'Cloud brain connectors require user-owned credentials or subscription access.', category:'connector', timestamp: new Date(Date.now() - 3600_000).toISOString() }
     ];
   }
   // Compute salience and sort
@@ -4776,18 +4763,12 @@ async function buildBrainData(){
   }
   if (!memories.length){
     const samples = [
-      { c:'Stripe 3-tier billing wired · /api/billing/checkout',                  cat:'product',  tier:'L3', region:'executive' },
-      { c:'GPU0 = display GPU, slow. GPU1 = compute. No NVLink.',                 cat:'hardware', tier:'L3', region:'spinal'    },
-      { c:'Ahmad lives in Ohio · ABUZ8 LLC · EIN 41-5161931',                    cat:'identity', tier:'L3', region:'executive' },
-      { c:'$1T banked → mosques, schools, water across Sahara',                   cat:'mission',  tier:'L3', region:'limbic'    },
-      { c:'Never delete working code without backup first',                       cat:'doctrine', tier:'L3', region:'memory'    },
-      { c:'Photosensitivity: light UI for work, dark cinematic for public',       cat:'design',   tier:'L3', region:'visual'    },
-      { c:'Qadir Core enterprise white-label $10K-$80K per deploy',               cat:'revenue',  tier:'R1', region:'executive' },
-      { c:'Soloman lifetime $299 early-access pricing',                           cat:'revenue',  tier:'R1', region:'executive' },
-      { c:'Custom AI agent builds $2K-$10K + $500/mo retainer',                   cat:'revenue',  tier:'R1', region:'executive' },
-      { c:'ComfyUI lipsync pipeline · 15+ workflows on GPU1',                     cat:'product',  tier:'L3', region:'visual'    },
-      { c:'Memory tiers: L1 working · L2 session · L3 longterm · L4 archive',     cat:'doctrine', tier:'L3', region:'memory'    },
-      { c:'SHA-512 audit chain — every action linked',                            cat:'doctrine', tier:'L3', region:'executive' },
+      { c:'This computer has its own local ABUZ8 memory store.',                  cat:'memory',   tier:'L3', region:'memory'    },
+      { c:'The bundled 2.6B brain runs locally with CPU-only fallback.',           cat:'brain',    tier:'L3', region:'executive' },
+      { c:'Model downloads are stored under this user profile only.',             cat:'models',   tier:'L3', region:'memory'    },
+      { c:'Cloud brains require user-owned credentials or subscription access.',  cat:'connector',tier:'L3', region:'executive' },
+      { c:'Mission board tasks are created fresh for this workspace.',            cat:'mission',  tier:'L3', region:'limbic'    },
+      { c:'Action tools require session-only Allow actions consent.',             cat:'safety',   tier:'L3', region:'executive' },
       { c:'Salience S = R×R×E×U×C×R decides retrieval',                          cat:'doctrine', tier:'L3', region:'memory'    },
       { c:'Bismillah — every session honors the mission',                         cat:'identity', tier:'L3', region:'limbic'    },
       { c:'14 systems wired end-to-end · verify.html harness passing',           cat:'session',  tier:'L1', region:'memory'    },
@@ -6007,12 +5988,12 @@ const DEPLOY_CONFIGS = {
     verdictClass: '',
     steps: [
       'Open Safari on iPhone/iPad',
-      'Navigate to your OS URL (<code>os.abuz8ai.com</code> or your local Tailscale IP)',
+      'Use the Windows desktop app on the computer you want ABUZ8 OS to control',
       'Tap Share → <b>Add to Home Screen</b>',
       'Custom icon + "ABUZ8 OS" name confirm → tap Add',
       'PWA opens fullscreen, no browser chrome',
       'For backend: brain URLs must be HTTPS (Safari blocks mixed content)',
-      'Use Cloudflare tunnel or Tailscale Funnel to expose Qadir over HTTPS',
+      'Optional hosted access requires an HTTPS endpoint that you configure yourself',
       'Tap Mic-allow when prompted (Harmonic Cortex + Avatar Listen require it)'
     ],
     pwsh: '# iPhone has no PowerShell. Use the mobile web/PWA companion when hosted over HTTPS.\n# For local desktop control, use the Windows app on the target computer.'
@@ -6027,7 +6008,7 @@ const DEPLOY_CONFIGS = {
       'Navigate to your OS URL',
       'Chrome menu (⋮) → <b>Install app</b> · ABUZ8 OS appears in app drawer',
       'PWA runs as a native app · supports background sync via service worker',
-      'For backend over HTTPS: use Tailscale Funnel or Cloudflare tunnel',
+      'Optional hosted access requires an HTTPS endpoint that you configure yourself',
       'Telegram mirror works direct from browser (Telegram API has CORS)',
       'Push notifications via Web Push (requires backend opt-in subscription)'
     ],

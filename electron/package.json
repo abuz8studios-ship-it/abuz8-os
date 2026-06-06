@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "ABUZ8 OS — Sovereign Desktop",
   "main": "main.js",
-  "author": "ABUZ8 LLC <ahmad@abuz8ai.com>",
+  "author": "ABUZ8 LLC <support@abuz8ai.com>",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
@@ -34,7 +34,6 @@
       "renderer/sw.js",
       "renderer/mobile.html",
       "renderer/verify.html",
-      "renderer/specs/**/*",
       "!renderer/**/*.bak*",
       "!renderer/__mobile_check.html"
     ],

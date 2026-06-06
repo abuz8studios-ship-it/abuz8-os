@@ -18,7 +18,7 @@ param(
   [Parameter(Mandatory=$true)] [System.Security.SecureString] $CertPassword,
   [string] $TimestampUrl = 'http://timestamp.sectigo.com',
   [ValidateSet('SHA256','SHA384')] [string] $Algorithm = 'SHA256',
-  [string] $ArtifactDir = 'E:\ABU\ABUZ8_OS_DIST\electron\out'
+  [string] $ArtifactDir = (Join-Path $PSScriptRoot 'electron\out')
 )
 
 $ErrorActionPreference = 'Stop'

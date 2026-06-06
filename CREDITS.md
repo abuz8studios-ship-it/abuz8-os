@@ -2,10 +2,10 @@
 
 ABUZ8 builds on open-source. We name what we build on - always.
 If you maintain a project here and want different or expanded credit, email
-ahmad@abuz8ai.com and we will fix it immediately. Fair credit matters.
+support@abuz8ai.com and we will fix it immediately. Fair credit matters.
 
 ## The brain
-- Liquid AI - LFM2 / LFM2.5 foundation models. The local intelligence inside Qadir OS.
+- Liquid AI - LFM2 foundation models. The local intelligence inside ABUZ8 OS.
   License: LFM Open License v1.0 (Apache-2.0 based). https://www.liquid.ai
 
 ## Core runtime
