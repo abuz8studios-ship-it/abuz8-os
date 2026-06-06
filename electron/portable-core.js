@@ -1257,6 +1257,45 @@ function sendSse(res, payload, brain = 'Portable Core') {
   tick();
 }
 
+function sendTui(res) {
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ABUZ8 Local TUI</title>
+  <style>
+    :root{color-scheme:dark;font-family:Consolas, ui-monospace, monospace;background:#050907;color:#d9f8ea}
+    body{margin:0;padding:16px;background:#050907}
+    header{display:flex;align-items:center;gap:10px;border-bottom:1px solid #254136;padding-bottom:10px;margin-bottom:12px}
+    .dot{width:8px;height:8px;border-radius:50%;background:#19e0ad;box-shadow:0 0 16px #19e0ad}
+    h1{font-size:14px;margin:0;color:#f2d27a;letter-spacing:.02em}
+    #log{height:calc(100vh - 118px);overflow:auto;white-space:pre-wrap;line-height:1.5;font-size:13px}
+    form{display:flex;gap:8px;position:fixed;left:12px;right:12px;bottom:12px}
+    input{flex:1;background:#0b1411;border:1px solid #254136;color:#d9f8ea;border-radius:8px;padding:10px;font:inherit}
+    button{background:#19e0ad;color:#03100c;border:0;border-radius:8px;padding:10px 14px;font-weight:700}
+    .sys{color:#72d7b9}.user{color:#f2d27a}.agent{color:#d9f8ea}.err{color:#ff746a}
+  </style>
+</head>
+<body>
+  <header><span class="dot"></span><h1>ABUZ8 LOCAL TUI - 127.0.0.1:${PORT}</h1></header>
+  <main id="log"><span class="sys">Portable Core online. Native LFM brain remains primary. Type a prompt or action command.</span></main>
+  <form id="f"><input id="q" autocomplete="off" placeholder="Ask, /probe, open Paint, draw a monkey in Paint..."><button>Send</button></form>
+  <script>
+    const log=document.getElementById('log'), q=document.getElementById('q'), f=document.getElementById('f');
+    function line(cls, text){ const d=document.createElement('div'); d.className=cls; d.textContent='\\n'+text; log.appendChild(d); log.scrollTop=log.scrollHeight; }
+    f.onsubmit=async(e)=>{ e.preventDefault(); const text=q.value.trim(); if(!text)return; q.value=''; line('user','> '+text); try{ const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({content:text,agentic:true})}); const j=await r.json(); line(j.ok?'agent':'err', (j.brain||'core')+': '+(j.response||j.error||JSON.stringify(j))); }catch(err){ line('err','error: '+err.message); } };
+  </script>
+</body>
+</html>`;
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'access-control-allow-origin': '*'
+  });
+  res.end(html);
+}
+
 function memoryFile() {
   return path.join(dataRoot, 'memory', 'events.jsonl');
 }
@@ -1450,6 +1489,7 @@ async function route(req, res) {
   const { pathname, searchParams } = splitPath(req.url);
   if (req.method === 'OPTIONS') return text(res, 204, '');
 
+  if (pathname === '/tui') return sendTui(res);
   if (pathname === '/' || pathname === '/health') {
     return json(res, 200, { ok: true, service: 'portable-core', port: PORT, data_root: dataRoot });
   }

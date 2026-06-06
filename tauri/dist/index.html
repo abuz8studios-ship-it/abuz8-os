@@ -1212,7 +1212,7 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
             <button id="tui-mode-btn" onclick="toggleTuiMode()" title="TUI Mode — voice + secure context via localhost" style="background:none;border:1px solid var(--border);border-radius:10px;color:var(--gold);padding:5px 10px;cursor:pointer;font-size:11px;margin-left:8px;transition:all .15s">🔗 TUI Mode</button>
           </div>
           <!-- TUI iframe (hidden by default, shown when TUI Mode toggled) -->
-          <iframe id="tui-frame" src="http://127.0.0.1:8900" style="display:none;width:100%;flex:1;border:none;border-radius:12px;min-height:0" allow="microphone;autoplay" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+          <iframe id="tui-frame" src="http://127.0.0.1:8900/tui" style="display:none;width:100%;flex:1;border:none;border-radius:12px;min-height:0" allow="microphone;autoplay" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
 
           <!-- Native chat area (visible by default) -->
           <div id="native-chat-area" style="display:flex;flex-direction:column;flex:1;min-height:0">
