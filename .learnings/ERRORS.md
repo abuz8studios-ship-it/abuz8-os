@@ -32,3 +32,9 @@ Command failures and integration errors.
 - Context: Extended action-tool verifier failed because a local variable was named $Host, which conflicts with PowerShell's read-only built-in $Host.
 - Fix: Use non-reserved names such as $hostCall for command responses in verifier scripts.
 
+## 2026-06-06 - Copy-Item wildcard with LiteralPath
+
+- Context: Copying the final ABUZ8 Consumer Pro release folder to a removable card.
+- Failure: `Copy-Item -LiteralPath (Join-Path $src '*')` treated the asterisk literally and failed with "Cannot find path ...\\*".
+- Fix: Use `Copy-Item -Path (Join-Path $src '*')` when copying folder contents with a wildcard, or enumerate files explicitly and pass each path as a literal path.
+
