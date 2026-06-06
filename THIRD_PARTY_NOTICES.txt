@@ -7,6 +7,12 @@ EMBEDDED MODEL: Liquid Foundation Models (LFM2 / LFM2.5) by Liquid AI
   License: LFM Open License v1.0 (Apache-2.0 based). Free commercial use under $10M revenue.
   https://www.liquid.ai/lfm-license
 
+MICROSOFT VISUAL C++ RUNTIME FILES
+  Bundled beside the llama.cpp runtime for clean Windows machines that do not
+  already have the Visual C++ Redistributable installed:
+  concrt140.dll, msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll
+  License: Microsoft Visual C++ Redistributable license terms.
+
 BUNDLED PACKAGES (340):
   - @develar/schema-utils 2.6.5 | MIT | https://github.com/webpack/schema-utils
   - @electron/asar 3.4.1 | MIT | https://github.com/electron/asar
