@@ -189,6 +189,22 @@ function Test-ActionTools {
     -Observed @{ new_mspaint_pids = $newPaint; accepted = $openApp.Ok } `
     -Cleaned:($newPaint.Count -gt 0)
 
+  $beforeAgentPaint = Get-ProcessIdsByName -Names @("mspaint")
+  $agentPaint = Try-CoreJson -Method POST -Path "/api/chat" -Body @{
+    content = "Open Paint"
+    agentic = $true
+  } -TimeoutSec 60
+  $newAgentPaint = if ($agentPaint.Ok) { Wait-NewProcess -Names @("mspaint") -Before $beforeAgentPaint -TimeoutSec 15 } else { @() }
+  if ($newAgentPaint.Count -gt 0) {
+    Stop-Ids -Ids $newAgentPaint
+    $cleanup += "agentic chat mspaint pid(s) $($newAgentPaint -join ',') closed"
+  }
+  $proof.agentic_chat_open_app = New-ToolProof `
+    -Pass:($agentPaint.Ok -and $newAgentPaint.Count -gt 0 -and [string]$agentPaint.Value.tool_call.tool -eq "open_app") `
+    -Reason $(if ($agentPaint.Ok) { "chat agent path opened mspaint through dispatcher" } else { $agentPaint.Error }) `
+    -Observed @{ new_mspaint_pids = $newAgentPaint; accepted = $agentPaint.Ok; tool_call = $agentPaint.Value.tool_call } `
+    -Cleaned:($newAgentPaint.Count -gt 0)
+
   $shot = Try-CoreJson -Method POST -Path "/api/tools/call" -Body @{
     tool = "screenshot"
     args = @{}
@@ -269,9 +285,10 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 Stop-CorePorts
 
 $allVariants = @(
-  @{ Name = "lite"; Expected = "LFM2.5 350M Lite" },
-  @{ Name = "standard"; Expected = "LFM2 1.2B Tool" },
-  @{ Name = "pro"; Expected = "LFM2 2.6B Pro" }
+  @{ Name = "lite"; Expected = "LFM2.5 350M Lite"; Brain = "lite" },
+  @{ Name = "standard"; Expected = "LFM2 1.2B Tool"; Brain = "standard" },
+  @{ Name = "pro"; Expected = "LFM2 2.6B Pro"; Brain = "pro" },
+  @{ Name = "consumer-pro-2.6b"; Expected = "LFM2 2.6B Pro"; Brain = "pro" }
 )
 $requestedVariants = @($Variants | ForEach-Object { ([string]$_).Split(',', [System.StringSplitOptions]::RemoveEmptyEntries) } | ForEach-Object { $_.Trim().ToLowerInvariant() })
 $variantsToRun = @($allVariants | Where-Object { $requestedVariants -contains $_.Name })
@@ -305,21 +322,32 @@ foreach ($v in $variantsToRun) {
     $toolCreate = Invoke-CoreJson -Method POST -Path "/api/tools/create" -Body @{ name = "verify-$($v.Name)-tool"; description = "Release verifier local tool"; type = "manual" } -TimeoutSec 20
     $toolCall = Invoke-CoreJson -Method POST -Path "/api/tools/call" -Body @{ tool = "abuz8_device_probe"; args = @{} } -TimeoutSec 30
     $actionTools = Test-ActionTools -VariantName $v.Name
-    $brainSelect = Invoke-CoreJson -Method POST -Path "/api/brains/select" -Body @{ brain = $v.Name } -TimeoutSec 20
+    $brainSelect = Invoke-CoreJson -Method POST -Path "/api/brains/select" -Body @{ brain = $v.Brain } -TimeoutSec 20
     $toolsList = Invoke-CoreJson -Method GET -Path "/api/tools/list" -TimeoutSec 20
 
     $mcpTools = @()
-    if ($v.Name -eq "pro") {
+    if ($v.Name -eq "pro" -or $v.Name -eq "consumer-pro-2.6b") {
       $sym = Invoke-CoreJson -Method POST -Path "/api/mcp/install/claude-symbiote" -Body @{} -TimeoutSec 20
       if (!(Test-Path -LiteralPath $sym.server.command)) { throw "Claude symbiote node.exe was not persisted" }
       if (!(Test-Path -LiteralPath $sym.server.args[0])) { throw "Claude symbiote bridge was not persisted" }
       $mcpTools = Test-McpBridge -Command $sym.server.command -Bridge $sym.server.args[0]
     }
 
+    $embeddedModels = @($models.embedded | Where-Object { $_.embedded -eq $true })
+    $consumerSingleProBrain = $true
+    if ($v.Name -eq "consumer-pro-2.6b") {
+      $consumerSingleProBrain = (
+        $embeddedModels.Count -eq 1 -and
+        [string]$embeddedModels[0].model_file -eq "LFM2-2.6B-Exp-Q4_K_M.gguf" -and
+        [string]$embeddedModels[0].tier -eq "pro"
+      )
+    }
+
     $allPass = (
       ($chat.fallback -eq $false) -and
       ($probe.tier -ne $null) -and
-      (@($models.embedded).Count -gt 0) -and
+      ($embeddedModels.Count -gt 0) -and
+      $consumerSingleProBrain -and
       ($cli.result.ok -eq $true) -and
       ($reg.ok -eq $true) -and
       ($missionMove.task.column -eq "done") -and
@@ -337,7 +365,8 @@ foreach ($v in $variantsToRun) {
       Brain = $chat.brain
       Fallback = $chat.fallback
       ProbeTier = $probe.tier
-      EmbeddedCount = @($models.embedded).Count
+      EmbeddedCount = $embeddedModels.Count
+      EmbeddedModels = @($embeddedModels | ForEach-Object { $_.model_file })
       CliProbe = $cli.result.ok
       CliRegistered = $reg.ok
       MissionTasksBefore = @($missionBefore.tasks).Count

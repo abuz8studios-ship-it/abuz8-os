@@ -920,17 +920,17 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
 <div id="onb-overlay">
   <div class="onb-card">
     <div class="onb-step on" data-step="0">
-      <div class="onb-eyebrow">Sovereign OS · v1.0</div>
+      <div class="onb-eyebrow">ABUZ8 OS Pro · v1.0</div>
       <div class="onb-title">✧ Welcome to ABUZ8 OS</div>
-      <div class="onb-sub">This isn't a chatbot — it's a <b>sovereign operating system</b> that runs your AI brains, your CRM, your tools, and your creative pipeline from one shell. It runs on <b>your machine</b>, with your engines, your data, your keys. Let's get you oriented in 5 steps.</div>
-      <div class="onb-feat"><div class="ico">🧠</div><div class="ft"><b>Multi-brain</b><p>Portable Core starts locally; Hermes, OpenClaw, Docker, and cloud brains connect when available.</p></div></div>
-      <div class="onb-feat"><div class="ico">🖥️</div><div class="ft"><b>Hands-on</b><p>Operates your desktop. Opens apps, clicks, types, generates.</p></div></div>
-      <div class="onb-feat"><div class="ico">🔒</div><div class="ft"><b>Yours</b><p>Local-first. Your weights, your audit chain, your business.</p></div></div>
+      <div class="onb-sub">This is a local AI desktop agent for regular people: it opens with its own front end, local tool server, memory, mission board, MCP bridge, and bundled <b>LFM2 2.6B Pro</b> CPU brain. No home server is required.</div>
+      <div class="onb-feat"><div class="ico">🧠</div><div class="ft"><b>Bundled brain</b><p>The Pro build carries the 2.6B GGUF model and llama.cpp runtime inside the app package.</p></div></div>
+      <div class="onb-feat"><div class="ico">🖥️</div><div class="ft"><b>Agent tools</b><p>After you allow actions, it can open apps, open web pages, capture screenshots, write sandboxed files, and run safe system probes.</p></div></div>
+      <div class="onb-feat"><div class="ico">🔒</div><div class="ft"><b>Your machine</b><p>Memory, missions, connectors, downloaded models, and settings live in the portable data folder.</p></div></div>
     </div>
     <div class="onb-step" data-step="1">
       <div class="onb-eyebrow">Step 1 · Brains</div>
-      <div class="onb-title">Your engines</div>
-      <div class="onb-sub">ABUZ8 OS routes work across whichever brains are alive. Detected on this machine:</div>
+      <div class="onb-title">Your brain shelf</div>
+      <div class="onb-sub">The bundled 2.6B brain starts locally. You can also add user-approved GGUF files or register your own cloud model endpoints later.</div>
       <div id="onb-brains"><div style="font-size:12px;color:var(--text3)">Detecting engines…</div></div>
     </div>
     <div class="onb-step" data-step="2">
@@ -941,8 +941,8 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
     </div>
     <div class="onb-step" data-step="3">
       <div class="onb-eyebrow">Step 3 · Layout</div>
-      <div class="onb-title">Four view modes</div>
-      <div class="onb-sub">Toggle from the sidebar:</div>
+      <div class="onb-title">What is inside</div>
+      <div class="onb-sub">The app is organized around the daily work loop:</div>
       <div class="onb-feat"><div class="ico">🌌</div><div class="ft"><b>HUD</b><p>Cinematic widget desktop — boss avatar, mission hero, brain monitor, CRM.</p></div></div>
       <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>CHAT</b><p>3-column Claude-desktop. Thread + artifacts + sources/memory/tools rail.</p></div></div>
       <div class="onb-feat"><div class="ico">📊</div><div class="ft"><b>WORK</b><p>Mission Control. KPIs + portfolio of every product/asset you own.</p></div></div>
@@ -951,18 +951,18 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
     <div class="onb-step" data-step="4">
       <div class="onb-eyebrow">Step 4 · Try it</div>
       <div class="onb-title">Take it for a spin</div>
-      <div class="onb-sub">Pick one — watch the <b>Tools</b> rail on the right.</div>
-      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('/tool open_app {&quot;name&quot;:&quot;notepad&quot;}'))"><span class="tt">DESKTOP</span>Open Notepad</button>
-      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('/tool open_url {&quot;url&quot;:&quot;https://duckduckgo.com/?q=latest%20AI%20agent%20news&quot;}'))"><span class="tt">WEB</span>Search the web for the latest AI news</button>
+      <div class="onb-sub">Pick one. Desktop and web actions require the session Allow actions switch so the app cannot operate the computer silently.</div>
+      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Open Notepad'))"><span class="tt">DESKTOP</span>Open Notepad</button>
+      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Search the web for latest AI agent news'))"><span class="tt">WEB</span>Search the web</button>
       <button class="onb-try" onclick="onbTry('/probe')"><span class="tt">SYSTEM</span>Probe this device</button>
     </div>
     <div class="onb-step" data-step="5">
       <div class="onb-eyebrow">You're set</div>
       <div class="onb-title">Ready ✦</div>
-      <div class="onb-sub">Type in the command bar (top) or chat (CHAT mode). Press <b>⌘K</b> from anywhere. Re-open this guide via the <b>?</b> in the topbar.</div>
-      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>Plain language</b><p>"Open my budget file and add a row." "Find 3 suppliers."</p></div></div>
-      <div class="onb-feat"><div class="ico">👁️</div><div class="ft"><b>Watch it work</b><p>Right rail shows every tool call live.</p></div></div>
-      <div class="onb-feat"><div class="ico">⚡</div><div class="ft"><b>Switch brains</b><p>@qadir, @soloman, @hermes, @zait — anytime.</p></div></div>
+      <div class="onb-sub">Type in the command bar or chat. Press <b>Ctrl+K</b> from anywhere. Re-open this guide with the <b>?</b> in the topbar.</div>
+      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>Plain language</b><p>"Open Paint." "Take a screenshot." "Remember my supplier list."</p></div></div>
+      <div class="onb-feat"><div class="ico">👁️</div><div class="ft"><b>Watch it work</b><p>The Tools rail shows available tools and permission state.</p></div></div>
+      <div class="onb-feat"><div class="ico">⚡</div><div class="ft"><b>Extend it</b><p>Import MCP connectors, add local GGUF brains, or register cloud brains with your own keys.</p></div></div>
     </div>
     <div class="onb-foot">
       <button class="onb-btn ghost" onclick="onbSkip()">Skip</button>

@@ -238,6 +238,8 @@ function localToolsList() {
     { name: 'abuz8_mission_task_create', type: 'mcp', status: 'ready', description: 'Create or update a mission task from Claude Desktop.' },
     { name: 'abuz8_mission_task_move', type: 'mcp', status: 'ready', description: 'Move a mission task between Kanban columns.' },
     { name: 'huggingface_model_download', type: 'local-api', status: 'permission-gated', description: 'Download model files to the local model shelf with allow_network_download.' },
+    { name: 'model_download_hf', type: 'network-model', status: 'permission-gated', description: 'Alias for downloading a user-approved Hugging Face GGUF into the portable data model shelf.' },
+    { name: 'cloud_brain_register', type: 'cloud-model', status: 'permission-gated', description: 'Register a user-owned cloud brain endpoint or provider key reference locally.' },
     { name: 'open_url', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an http/https URL in the default browser after Allow actions consent.' },
     { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, calc, or explorer.' },
     { name: 'screenshot', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Capture the primary screen to the portable data shots folder.' },
@@ -409,6 +411,12 @@ async function callLocalTool(name, args = {}) {
   }
   if (isTool('abuz8_brain_select', 'brain_select', 'select_brain')) {
     return { ok: true, tool: toolName, result: setActiveBrain(body.brain || body.id || body.tier || body.name || 'auto') };
+  }
+  if (isTool('huggingface_model_download', 'model_download_hf')) {
+    return { ok: true, tool: toolName, result: await downloadHuggingFaceModel(body) };
+  }
+  if (isTool('cloud_brain_register')) {
+    return { ok: true, tool: toolName, result: registerCloudBrain(body) };
   }
   if (isTool('abuz8_memory_write', 'memory_write')) {
     const item = { id: crypto.randomUUID(), type: body.type || 'note', content: body.content || body.text || '', timestamp: new Date().toISOString() };
@@ -647,7 +655,7 @@ function brainRuntimeFiles() {
 
 function availableEmbeddedBrains() {
   const runtime = brainRuntimeFiles();
-  return EMBEDDED_BRAIN_CATALOG.map((brain) => {
+  const bundled = EMBEDDED_BRAIN_CATALOG.map((brain) => {
     const model = path.join(runtime.dir, brain.file);
     const present = exists(runtime.server) && exists(model);
     const size = present ? fs.statSync(model).size : 0;
@@ -660,6 +668,44 @@ function availableEmbeddedBrains() {
       size_mb: Math.round(size / 1024 / 1024),
       runtime: exists(runtime.server) ? 'llama.cpp' : null,
       port: LFM_PORT
+    };
+  });
+  const downloaded = dataRoot ? downloadedGgufBrains(runtime) : [];
+  return bundled.concat(downloaded);
+}
+
+function downloadedGgufBrains(runtime) {
+  const root = path.join(dataRoot, 'models');
+  const found = [];
+  const walk = (dir) => {
+    if (!exists(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.gguf')) found.push(full);
+    }
+  };
+  walk(root);
+  return found.map((model) => {
+    const rel = path.relative(root, model).replace(/\\/g, '/');
+    const id = `local-${slug(rel.replace(/\.gguf$/i, ''))}`;
+    const size = fs.statSync(model).size;
+    return {
+      id,
+      name: `Local GGUF: ${path.basename(model, '.gguf')}`,
+      file: path.basename(model),
+      tier: 'local',
+      role: 'user-downloaded local brain stored inside portable data',
+      min_ram_gb: Math.max(8, Math.ceil(size / 1024 / 1024 / 1024) * 3),
+      context: 2048,
+      embedded: exists(runtime.server),
+      model,
+      model_file: rel,
+      size_bytes: size,
+      size_mb: Math.round(size / 1024 / 1024),
+      runtime: exists(runtime.server) ? 'llama.cpp' : null,
+      port: LFM_PORT,
+      user_model: true
     };
   });
 }
@@ -676,7 +722,7 @@ function selectEmbeddedBrain() {
   const available = availableEmbeddedBrains().filter((b) => b.embedded);
   if (!available.length) return null;
   if (requested) {
-    const exact = available.find((b) => [b.id, b.tier, b.name.toLowerCase()].includes(requested));
+    const exact = available.find((b) => [b.id, b.tier, b.name.toLowerCase(), String(b.model_file || '').toLowerCase()].includes(requested));
     if (exact) return exact;
   }
   const totalGb = os.totalmem() / 1024 / 1024 / 1024;
@@ -827,11 +873,36 @@ async function ensureEmbeddedBrain() {
   }
 }
 
-async function embeddedReply(prompt) {
+function agentToolInstructions() {
+  return [
+    'You are ABUZ8 OS Pro, a consumer desktop agent running fully local on CPU.',
+    'You can request exactly one tool call by returning ONLY compact JSON in this shape:',
+    '{"tool":"tool_name","args":{}}',
+    'If no tool is needed, return normal helpful text.',
+    'Available tools:',
+    '- abuz8_device_probe {}',
+    '- abuz8_memory_write {"content":"..."}',
+    '- abuz8_mission_board {}',
+    '- abuz8_mission_task_create {"title":"...","column":"ready","priority":"medium","details":"..."}',
+    '- model_download_hf {"repo":"org/repo","file":"model.gguf","allow_network_download":true}',
+    '- cloud_brain_register {"provider":"openai|anthropic|custom","endpoint":"https://...","model":"...","api_key_env":"ENV_NAME","allow_cloud_brain":true}',
+    '- open_url {"url":"https://example.com"}',
+    '- open_app {"name":"notepad|mspaint|calc|explorer"}',
+    '- screenshot {}',
+    '- file_write {"relpath":"notes/example.txt","content":"..."}',
+    '- shell_run {"cmd":"whoami|hostname|dir"}',
+    'Action tools require the user to enable Allow actions for this session. Never invent unsupported tools.',
+    ''
+  ].join('\n');
+}
+
+async function embeddedReply(prompt, opts = {}) {
   const ready = await ensureEmbeddedBrain();
   if (!ready) return null;
   const brain = activeBrain || selectEmbeddedBrain();
-  const modelPrompt = `You are ABUZ8 OS Portable Brain running ${brain?.name || 'an embedded LFM model'}. Be concise, practical, and tool-aware.\n\nUser: ${prompt}\nAssistant:`;
+  const modelPrompt = opts.agentic
+    ? `${agentToolInstructions()}\nUser: ${prompt}\nAssistant:`
+    : `You are ABUZ8 OS Portable Brain running ${brain?.name || 'an embedded LFM model'}. Be concise, practical, and tool-aware.\n\nUser: ${prompt}\nAssistant:`;
   for (let i = 0; i < 3; i++) {
     try {
       const out = await httpJson('POST', LFM_PORT, '/completion', {
@@ -860,6 +931,98 @@ async function embeddedReply(prompt) {
     await new Promise((resolve) => setTimeout(resolve, 900));
   }
   return null;
+}
+
+function extractJsonObject(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : raw;
+  if (candidate.startsWith('{') && candidate.endsWith('}')) {
+    try { return JSON.parse(candidate); } catch {}
+  }
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(candidate.slice(start, end + 1)); } catch {}
+  }
+  return null;
+}
+
+function parseAgentToolCall(text) {
+  const parsed = extractJsonObject(text);
+  if (!parsed || !parsed.tool) return null;
+  const tool = String(parsed.tool || '').trim();
+  const args = parsed.args && typeof parsed.args === 'object' ? parsed.args : {};
+  return { tool, args };
+}
+
+function inferConsumerToolCall(prompt) {
+  const msg = String(prompt || '').trim();
+  const lower = msg.toLowerCase();
+  if (!msg) return null;
+  if (lower === '/probe' || /\b(probe|scan|check)\b.*\b(device|computer|system|machine|hardware)\b/.test(lower)) {
+    return { tool: 'abuz8_device_probe', args: {} };
+  }
+  if (/\b(open|launch|start)\b.*\b(paint|mspaint)\b/.test(lower)) return { tool: 'open_app', args: { name: 'mspaint' } };
+  if (/\b(open|launch|start)\b.*\bnotepad\b/.test(lower)) return { tool: 'open_app', args: { name: 'notepad' } };
+  if (/\b(open|launch|start)\b.*\b(calc|calculator)\b/.test(lower)) return { tool: 'open_app', args: { name: 'calc' } };
+  if (/\b(open|launch|start)\b.*\b(explorer|file explorer|files)\b/.test(lower)) return { tool: 'open_app', args: { name: 'explorer' } };
+  if (/\b(screenshot|screen shot|capture screen)\b/.test(lower)) return { tool: 'screenshot', args: {} };
+  const urlMatch = msg.match(/\bhttps?:\/\/[^\s"'<>]+/i);
+  if (urlMatch && /\b(open|visit|go to|browse)\b/i.test(msg)) return { tool: 'open_url', args: { url: urlMatch[0] } };
+  if (/\b(search|look up|google|duckduckgo)\b.*\b(web|internet|online)\b/i.test(msg)) {
+    const q = msg.replace(/\b(search|look up|google|duckduckgo|the|web|internet|online|for)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (q) return { tool: 'open_url', args: { url: `https://duckduckgo.com/?q=${encodeURIComponent(q)}` } };
+  }
+  if (/\b(hostname|machine name)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'hostname' } };
+  if (/\b(whoami|current user)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'whoami' } };
+  if (/\b(list|show)\b.*\b(directory|folder|files)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'dir' } };
+  return null;
+}
+
+function summarizeToolResult(tool, result) {
+  const payload = result?.result ?? result;
+  if (tool === 'open_app') return `Done. Opened ${payload.app || payload.file || 'the requested app'}.`;
+  if (tool === 'open_url') return `Done. Opened ${payload.url || 'the requested URL'} in the default browser.`;
+  if (tool === 'screenshot') return `Done. Screenshot saved to ${payload.file}.`;
+  if (tool === 'file_write') return `Done. Wrote ${payload.bytes || 0} bytes to ${payload.file}.`;
+  if (tool === 'shell_run') return `Done.\n\n${String(payload.stdout || '').trim()}`;
+  if (tool === 'abuz8_device_probe') {
+    return `Device probe complete: ${payload.system?.hostname || os.hostname()} · ${payload.cpu?.name || 'CPU'} · ${payload.memory?.total_gb || '?'}GB RAM · tier ${payload.tier || 'unknown'}.`;
+  }
+  if (tool === 'abuz8_mission_board') return `Mission board loaded. ${payload.summary || ''}`.trim();
+  return `Tool ${tool} completed.\n\n${JSON.stringify(payload, null, 2)}`;
+}
+
+async function agenticReply(prompt, opts = {}) {
+  const direct = inferConsumerToolCall(prompt);
+  const modelResponse = direct ? null : await embeddedReply(prompt, { agentic: true });
+  const requested = direct || parseAgentToolCall(modelResponse);
+  if (!requested) {
+    return { response: modelResponse || localReply(prompt), modelResponse, tool_call: null, tool_result: null, fallback: !modelResponse };
+  }
+  try {
+    const toolResult = await callLocalTool(requested.tool, requested.args || {});
+    return {
+      response: summarizeToolResult(requested.tool, toolResult),
+      modelResponse,
+      tool_call: requested,
+      tool_result: toolResult,
+      fallback: !modelResponse && !direct
+    };
+  } catch (e) {
+    const blocked = /Allow actions|blocked|Allowed|consent/i.test(e.message || '');
+    return {
+      response: blocked
+        ? `I can do that, but real-world actions are locked until you turn on Allow actions for this session. ${e.message}`
+        : `I tried to run ${requested.tool}, but it failed: ${e.message}`,
+      modelResponse,
+      tool_call: requested,
+      tool_error: e.message,
+      fallback: !modelResponse && !direct
+    };
+  }
 }
 
 function localReply(prompt) {
@@ -997,6 +1160,47 @@ function listDownloadedModels() {
   return rows;
 }
 
+async function downloadHuggingFaceModel(body = {}) {
+  if (!body.allow_network_download) {
+    throw new Error('allow_network_download must be true before downloading model files.');
+  }
+  const url = huggingFaceUrl(body);
+  if (!url || !url.startsWith('https://huggingface.co/')) {
+    throw new Error('Provide a Hugging Face repo+file or a direct https://huggingface.co/... model URL.');
+  }
+  const repoName = cleanSegment(body.repo || 'direct-download');
+  const fileName = path.basename(new URL(url).pathname) || cleanSegment(body.file || 'model.gguf');
+  const dest = path.join(dataRoot, 'models', 'huggingface', repoName, fileName);
+  const result = await downloadFile(url, dest, body.token || process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN);
+  return {
+    ok: true,
+    url,
+    path: dest,
+    size_mb: Math.round(result.bytes / 1024 / 1024),
+    selectable_brain_id: fileName.toLowerCase().endsWith('.gguf') ? `local-${slug(path.relative(path.join(dataRoot, 'models'), dest).replace(/\.gguf$/i, ''))}` : null,
+    note: 'Downloaded locally. GGUF files in the portable model shelf are selectable as local brains.'
+  };
+}
+
+function registerCloudBrain(body = {}) {
+  if (!body.allow_cloud_brain) throw new Error('allow_cloud_brain must be true before registering a cloud brain.');
+  const id = slug(body.id || body.name || body.provider || `cloud-${Date.now()}`);
+  if (!id) throw new Error('cloud brain id/name is required.');
+  if (!body.endpoint && !body.provider) throw new Error('provider or endpoint is required.');
+  const record = {
+    id,
+    name: body.name || id,
+    provider: body.provider || 'custom',
+    endpoint: body.endpoint || '',
+    model: body.model || '',
+    api_key_env: body.api_key_env || '',
+    status: 'registered',
+    registered_at: new Date().toISOString()
+  };
+  writeJson(path.join(dataRoot, 'config', 'cloud-brains', `${id}.json`), record);
+  return { ok: true, cloud_brain: record, dir: path.join(dataRoot, 'config', 'cloud-brains') };
+}
+
 async function machineProbe() {
   const gpus = await detectGpuNames();
   const totalGb = Math.round(os.totalmem() / 1024 / 1024 / 1024);
@@ -1071,12 +1275,33 @@ async function route(req, res) {
   if (pathname === '/api/chat' || pathname === '/api/chat/stream') {
     const body = await getBody(req);
     const prompt = body.content || body.message || body.prompt || body.raw;
-    const modelResponse = await embeddedReply(prompt);
-    const response = modelResponse || localReply(prompt);
-    appendJsonl(memoryFile(), { id: crypto.randomUUID(), type: 'chat', content: body.content || body.message || '', response, timestamp: new Date().toISOString() });
+    const agentic = body.agentic !== false;
+    const result = agentic
+      ? await agenticReply(prompt, body)
+      : { response: await embeddedReply(prompt) || localReply(prompt), modelResponse: null, fallback: false };
+    const response = result.response;
+    appendJsonl(memoryFile(), {
+      id: crypto.randomUUID(),
+      type: 'chat',
+      content: body.content || body.message || '',
+      response,
+      tool_call: result.tool_call || null,
+      tool_error: result.tool_error || null,
+      timestamp: new Date().toISOString()
+    });
     const embedded = embeddedBrainStatus();
-    if (pathname.endsWith('/stream')) return sendSse(res, response, modelResponse ? embedded.name : 'Portable Core');
-    return json(res, 200, { ok: true, response, brain: modelResponse ? embedded.name : 'Portable Core', latency_ms: modelResponse ? null : 1, embedded_brain: embedded, fallback: !modelResponse });
+    if (pathname.endsWith('/stream')) return sendSse(res, response, result.modelResponse ? embedded.name : 'Portable Core');
+    return json(res, 200, {
+      ok: true,
+      response,
+      brain: result.modelResponse ? embedded.name : 'Portable Core',
+      latency_ms: result.modelResponse ? null : 1,
+      embedded_brain: embedded,
+      fallback: Boolean(result.fallback),
+      tool_call: result.tool_call || null,
+      tool_result: result.tool_result || null,
+      tool_error: result.tool_error || null
+    });
   }
   if (pathname === '/api/onboarding/brains' || pathname === '/api/brains/list') {
     const embedded = embeddedBrainStatus();
@@ -1160,21 +1385,20 @@ async function route(req, res) {
   }
   if (pathname === '/api/models/huggingface/download') {
     const body = await getBody(req);
-    if (!body.allow_network_download) {
-      return json(res, 403, { ok: false, error: 'allow_network_download must be true before downloading model files.' });
-    }
-    const url = huggingFaceUrl(body);
-    if (!url || !/^https:\/\/(huggingface\.co|cdn-lfs\.huggingface\.co|[^/]+\.hf\.space)\//i.test(url)) {
-      return json(res, 400, { ok: false, error: 'Provide a Hugging Face repo+file or a direct https://huggingface.co/... model URL.' });
-    }
-    const repoName = cleanSegment(body.repo || 'direct-download');
-    const fileName = path.basename(cleanSegment(body.file || body.filename || new URL(url).pathname));
-    const dest = path.join(dataRoot, 'models', 'huggingface', repoName, fileName);
     try {
-      const result = await downloadFile(url, dest, body.token || process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN);
-      return json(res, 200, { ok: true, url, path: dest, size_mb: Math.round(result.bytes / 1024 / 1024), note: 'Downloaded locally. GGUF models can be moved into the bundled brain folder before building a release variant.' });
+      return json(res, 200, await downloadHuggingFaceModel(body));
     } catch (e) {
-      return json(res, 500, { ok: false, url, error: e.message });
+      const status = /allow_network_download/i.test(e.message) ? 403 : 400;
+      return json(res, status, { ok: false, error: e.message });
+    }
+  }
+  if (pathname === '/api/cloud-brains/register') {
+    const body = await getBody(req);
+    try {
+      return json(res, 200, registerCloudBrain(body));
+    } catch (e) {
+      const status = /allow_cloud_brain/i.test(e.message) ? 403 : 400;
+      return json(res, status, { ok: false, error: e.message });
     }
   }
   if (pathname === '/api/cli/probe') {
