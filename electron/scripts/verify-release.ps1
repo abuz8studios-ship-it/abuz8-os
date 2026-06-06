@@ -238,6 +238,30 @@ function Test-ActionTools {
     -Observed @{ new_mspaint_pids = $newAgentPaint; accepted = $agentPaint.Ok; tool_call = $agentPaint.Value.tool_call } `
     -Cleaned:($newAgentPaint.Count -gt 0)
 
+  $beforeMonkeyPaint = Get-ProcessIdsByName -Names @("mspaint")
+  $monkey = Try-CoreJson -Method POST -Path "/api/chat" -Body @{
+    content = "Open Microsoft Paint and draw a monkey."
+    agentic = $true
+  } -TimeoutSec 60
+  $newMonkeyPaint = if ($monkey.Ok) { Wait-NewProcess -Names @("mspaint") -Before $beforeMonkeyPaint -TimeoutSec 15 } else { @() }
+  $monkeyFile = if ($monkey.Ok) { [string]$monkey.Value.tool_result.result.file } else { "" }
+  $monkeyExists = $monkeyFile -and (Test-Path -LiteralPath $monkeyFile)
+  $monkeyInfo = if ($monkeyExists) { Get-Item -LiteralPath $monkeyFile } else { $null }
+  $monkeyBytes = if ($null -ne $monkeyInfo) { [int64]$monkeyInfo.Length } else { 0 }
+  if ($newMonkeyPaint.Count -gt 0) {
+    Stop-Ids -Ids $newMonkeyPaint
+    $cleanup += "agentic chat monkey mspaint pid(s) $($newMonkeyPaint -join ',') closed"
+  }
+  if ($monkeyExists) {
+    Remove-Item -LiteralPath $monkeyFile -Force -ErrorAction SilentlyContinue
+    $cleanup += "monkey drawing artifact deleted"
+  }
+  $proof.agentic_chat_draw_monkey_in_paint = New-ToolProof `
+    -Pass:($monkey.Ok -and $newMonkeyPaint.Count -gt 0 -and [string]$monkey.Value.tool_call.tool -eq "draw_monkey_in_paint" -and $monkeyExists -and $monkeyBytes -gt 1000) `
+    -Reason $(if ($monkey.Ok) { "chat agent path created a monkey PNG and opened it in Paint" } else { $monkey.Error }) `
+    -Observed @{ new_mspaint_pids = $newMonkeyPaint; accepted = $monkey.Ok; tool_call = $monkey.Value.tool_call; file = $monkeyFile; bytes = $monkeyBytes } `
+    -Cleaned:(($newMonkeyPaint.Count -gt 0) -and $monkeyExists)
+
   $shot = Try-CoreJson -Method POST -Path "/api/tools/call" -Body @{
     tool = "screenshot"
     args = @{}
@@ -343,6 +367,20 @@ foreach ($v in $variantsToRun) {
     $chat = Invoke-CoreJson -Method POST -Path "/api/chat" -Body @{ content = "One sentence: verify $($v.Name) release brain." } -TimeoutSec 180
     if ($chat.fallback -ne $false) { throw "$($v.Name) used fallback brain" }
     if ([string]$chat.brain -ne $v.Expected) { throw "$($v.Name) expected '$($v.Expected)' but got '$($chat.brain)'" }
+    $mathChat = Invoke-CoreJson -Method POST -Path "/api/chat" -Body @{ content = "Solve exactly and briefly: If x^2 - 5x + 6 = 0, what are all real x values? Do not use tools." } -TimeoutSec 180
+    $mathText = [string]$mathChat.response
+    $mathPass = (
+      ($mathChat.fallback -eq $false) -and
+      ($mathChat.tool_call -eq $null) -and
+      ($mathText -match "\b2\b") -and
+      ($mathText -match "\b3\b")
+    )
+    $memoryToken = "verify-memory-$($v.Name)-$([guid]::NewGuid().ToString('N'))"
+    $memoryWrite = Invoke-CoreJson -Method POST -Path "/api/memory/write" -Body @{ type = "release-proof"; text = "Release verifier memory token $memoryToken" } -TimeoutSec 20
+    $memorySearch = Invoke-CoreJson -Method GET -Path ("/api/memory/search?q=" + [uri]::EscapeDataString($memoryToken)) -TimeoutSec 20
+    $memorySearchPass = ($memoryWrite.ok -eq $true) -and (@($memorySearch.results | Where-Object { [string]$_.content -match [regex]::Escape($memoryToken) }).Count -gt 0)
+    $mcpToolsAlias = Invoke-CoreJson -Method GET -Path "/mcp/tools" -TimeoutSec 20
+    $mcpToolsAliasPass = ($mcpToolsAlias.ok -eq $true) -and (@($mcpToolsAlias.tools | Where-Object { $_.name -eq "abuz8_chat" }).Count -gt 0)
 
     $gateCli = $null
     try { $gateCli = Invoke-CoreJson -Method POST -Path "/api/cli/probe" -Body @{ command = "node"; args = @("--version") } -TimeoutSec 10 } catch { $gateCli = $_.Exception.Message }
@@ -397,6 +435,9 @@ foreach ($v in $variantsToRun) {
 
     $allPass = (
       ($chat.fallback -eq $false) -and
+      ($mathPass -eq $true) -and
+      ($memorySearchPass -eq $true) -and
+      ($mcpToolsAliasPass -eq $true) -and
       ($probe.tier -ne $null) -and
       ($embeddedModels.Count -gt 0) -and
       $consumerSingleProBrain -and
@@ -428,6 +469,20 @@ foreach ($v in $variantsToRun) {
       ToolCreated = $toolCreate.ok
       ToolCallWorked = $toolCall.ok
       ActionTools = $actionTools
+      MathProof = [pscustomobject]@{
+        Pass = $mathPass
+        Response = $mathText
+        ToolCall = $mathChat.tool_call
+      }
+      MemoryProof = [pscustomobject]@{
+        Pass = $memorySearchPass
+        Token = $memoryToken
+        ResultCount = @($memorySearch.results).Count
+      }
+      McpToolsAlias = [pscustomobject]@{
+        Pass = $mcpToolsAliasPass
+        ToolCount = @($mcpToolsAlias.tools).Count
+      }
       NativeTts = [pscustomobject]@{
         Pass = $nativeTtsPass
         Available = $nativeTtsAvailable

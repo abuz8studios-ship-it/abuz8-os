@@ -242,6 +242,7 @@ function localToolsList() {
     { name: 'cloud_brain_register', type: 'cloud-model', status: 'permission-gated', description: 'Register a user-owned cloud brain endpoint or provider key reference locally.' },
     { name: 'open_url', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an http/https URL in the default browser after Allow actions consent.' },
     { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, calc, or explorer.' },
+    { name: 'draw_monkey_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Create a simple monkey drawing in the portable sandbox and open it in Microsoft Paint.' },
     { name: 'screenshot', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Capture the primary screen to the portable data shots folder.' },
     { name: 'file_write', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Write a text file inside the portable data sandbox only.' },
     { name: 'shell_run', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Run only allowlisted shell probes: whoami, hostname, or dir. Default deny.' },
@@ -328,6 +329,55 @@ async function actionOpenApp(args = {}) {
   if (!app) throw new Error('Unsupported app. Allowed apps: notepad, mspaint, calc, explorer.');
   const result = await startProcessDetached(app.file, []);
   return { ...result, app: app.label };
+}
+
+async function actionDrawMonkeyInPaint(args = {}) {
+  requireActionConsent();
+  const artDir = safeMkdir(path.join(dataRoot, 'art'));
+  const file = path.join(artDir, `paint-monkey-${Date.now()}.png`);
+  const scriptFile = path.join(safeMkdir(path.join(dataRoot, 'cache')), `draw-monkey-${process.pid}-${Date.now()}.ps1`);
+  const caption = String(args.caption || 'ABUZ8 OS drew this locally').replace(/'/g, "''").slice(0, 80);
+  const script = [
+    'param([string]$OutFile, [string]$Caption)',
+    'Add-Type -AssemblyName System.Drawing',
+    '$bmp = New-Object System.Drawing.Bitmap 900, 700',
+    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+    '$bg = [System.Drawing.Brushes]::White',
+    '$g.FillRectangle($bg, 0, 0, 900, 700)',
+    '$fur = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(120, 78, 44))',
+    '$fur2 = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(88, 53, 31))',
+    '$skin = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(224, 174, 120))',
+    '$ink = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(45, 31, 24), 7)',
+    '$thin = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(45, 31, 24), 4)',
+    '$smile = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(80, 42, 34), 5)',
+    '$g.FillEllipse($fur2, 220, 95, 180, 180)',
+    '$g.FillEllipse($fur2, 500, 95, 180, 180)',
+    '$g.FillEllipse($fur, 250, 80, 400, 400)',
+    '$g.FillEllipse($skin, 315, 180, 270, 255)',
+    '$g.FillEllipse([System.Drawing.Brushes]::White, 365, 235, 55, 55)',
+    '$g.FillEllipse([System.Drawing.Brushes]::White, 480, 235, 55, 55)',
+    '$g.FillEllipse([System.Drawing.Brushes]::Black, 383, 252, 18, 18)',
+    '$g.FillEllipse([System.Drawing.Brushes]::Black, 498, 252, 18, 18)',
+    '$g.FillEllipse($fur2, 428, 290, 75, 58)',
+    '$g.FillEllipse($skin, 365, 325, 170, 90)',
+    '$g.DrawArc($smile, 400, 340, 100, 55, 15, 150)',
+    '$g.DrawEllipse($ink, 250, 80, 400, 400)',
+    '$g.DrawEllipse($thin, 220, 95, 180, 180)',
+    '$g.DrawEllipse($thin, 500, 95, 180, 180)',
+    '$g.DrawArc($thin, 180, 420, 190, 160, 190, 115)',
+    '$g.DrawArc($thin, 530, 420, 190, 160, 345, 115)',
+    '$font = New-Object System.Drawing.Font "Segoe UI", 24, ([System.Drawing.FontStyle]::Bold)',
+    '$g.DrawString($Caption, $font, [System.Drawing.Brushes]::Black, 245, 575)',
+    '$bmp.Save($OutFile, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '$g.Dispose(); $bmp.Dispose(); $fur.Dispose(); $fur2.Dispose(); $skin.Dispose(); $ink.Dispose(); $thin.Dispose(); $smile.Dispose(); $font.Dispose()'
+  ].join(os.EOL);
+  fs.writeFileSync(scriptFile, script, 'utf8');
+  const drawn = await runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, file, caption], 20000);
+  try { fs.unlinkSync(scriptFile); } catch {}
+  if (!drawn.ok || !fs.existsSync(file)) throw new Error(drawn.stderr || drawn.stdout || 'Monkey drawing failed.');
+  const opened = await startProcessDetached('mspaint.exe', [file]);
+  return { ...opened, app: 'Paint', file, bytes: fs.statSync(file).size };
 }
 
 async function actionOpenUrl(args = {}) {
@@ -424,8 +474,8 @@ async function callLocalTool(name, args = {}) {
     return { ok: true, tool: toolName, result: item };
   }
   if (isTool('memory_search', 'abuz8_memory_search')) {
-    const q = String(body.q || body.query || body.text || '').toLowerCase();
-    return { ok: true, tool: toolName, result: readMemory(250).filter((m) => JSON.stringify(m).toLowerCase().includes(q)).slice(0, 25) };
+    const q = String(body.q || body.query || body.text || '');
+    return { ok: true, tool: toolName, result: searchMemoryItems(q, 25) };
   }
   if (isTool('abuz8_tools_list', 'tools_list')) {
     return { ok: true, tool: toolName, result: localToolsList() };
@@ -450,6 +500,9 @@ async function callLocalTool(name, args = {}) {
   }
   if (isTool('open_app')) {
     return { ok: true, tool: toolName, result: await actionOpenApp(body) };
+  }
+  if (isTool('draw_monkey_in_paint', 'paint_monkey', 'draw_monkey')) {
+    return { ok: true, tool: toolName, result: await actionDrawMonkeyInPaint(body) };
   }
   if (isTool('screenshot')) {
     return { ok: true, tool: toolName, result: await actionScreenshot(body) };
@@ -1076,12 +1129,34 @@ function parseAgentToolCall(text) {
   return { tool, args };
 }
 
+function normalizedSearchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function searchMemoryItems(query, limit = 20) {
+  const q = normalizedSearchText(query);
+  if (!q) return readMemory(limit);
+  const tokens = q.split(' ').filter((t) => t.length > 1);
+  return readMemory(500).filter((m) => {
+    const hay = normalizedSearchText(JSON.stringify(m));
+    if (hay.includes(q)) return true;
+    return tokens.length > 0 && tokens.every((t) => hay.includes(t));
+  }).slice(0, limit);
+}
+
 function inferConsumerToolCall(prompt) {
   const msg = String(prompt || '').trim();
   const lower = msg.toLowerCase();
   if (!msg) return null;
   if (lower === '/probe' || /\b(probe|scan|check)\b.*\b(device|computer|system|machine|hardware)\b/.test(lower)) {
     return { tool: 'abuz8_device_probe', args: {} };
+  }
+  if (/\b(draw|paint|create)\b.*\bmonkey\b/.test(lower) && /\b(paint|mspaint|microsoft paint)\b/.test(lower)) {
+    return { tool: 'draw_monkey_in_paint', args: { caption: 'ABUZ8 OS local desktop action proof' } };
   }
   if (/\b(open|launch|start)\b.*\b(paint|mspaint)\b/.test(lower)) return { tool: 'open_app', args: { name: 'mspaint' } };
   if (/\b(open|launch|start)\b.*\bnotepad\b/.test(lower)) return { tool: 'open_app', args: { name: 'notepad' } };
@@ -1103,6 +1178,7 @@ function inferConsumerToolCall(prompt) {
 function summarizeToolResult(tool, result) {
   const payload = result?.result ?? result;
   if (tool === 'open_app') return `Done. Opened ${payload.app || payload.file || 'the requested app'}.`;
+  if (tool === 'draw_monkey_in_paint') return `Done. Drew a monkey image and opened it in Paint: ${payload.file}.`;
   if (tool === 'open_url') return `Done. Opened ${payload.url || 'the requested URL'} in the default browser.`;
   if (tool === 'screenshot') return `Done. Screenshot saved to ${payload.file}.`;
   if (tool === 'file_write') return `Done. Wrote ${payload.bytes || 0} bytes to ${payload.file}.`;
@@ -1116,19 +1192,19 @@ function summarizeToolResult(tool, result) {
 
 async function agenticReply(prompt, opts = {}) {
   const direct = inferConsumerToolCall(prompt);
-  const modelResponse = direct ? null : await embeddedReply(prompt, { agentic: true });
-  const requested = direct || parseAgentToolCall(modelResponse);
-  if (!requested) {
+  if (!direct) {
+    const modelResponse = await embeddedReply(prompt, { agentic: false });
     return { response: modelResponse || localReply(prompt), modelResponse, tool_call: null, tool_result: null, fallback: !modelResponse };
   }
+  const requested = direct;
   try {
     const toolResult = await callLocalTool(requested.tool, requested.args || {});
     return {
       response: summarizeToolResult(requested.tool, toolResult),
-      modelResponse,
+      modelResponse: null,
       tool_call: requested,
       tool_result: toolResult,
-      fallback: !modelResponse && !direct
+      fallback: false
     };
   } catch (e) {
     const blocked = /Allow actions|blocked|Allowed|consent/i.test(e.message || '');
@@ -1136,10 +1212,10 @@ async function agenticReply(prompt, opts = {}) {
       response: blocked
         ? `I can do that, but real-world actions are locked until you turn on Allow actions for this session. ${e.message}`
         : `I tried to run ${requested.tool}, but it failed: ${e.message}`,
-      modelResponse,
+      modelResponse: null,
       tool_call: requested,
       tool_error: e.message,
-      fallback: !modelResponse && !direct
+      fallback: false
     };
   }
 }
@@ -1155,7 +1231,7 @@ function localReply(prompt) {
     return 'For GPU-heavy avatar/rendering work, this build uses a fallback ladder: browser preview first, cloud/API renderer second, ComfyUI/NVIDIA worker only when a GPU runtime is connected. The OS stays usable without GPU.';
   }
   if (lower.includes('model') || lower.includes('brain')) {
-    return 'Recommended portable edge brain: Liquid LFM2-2.6B quantized for ONNX/GGUF. This core is connector-ready and stores models under the app data folder so the USB build does not depend on a home server.';
+    return 'The native LFM2 2.6B GGUF brain stays primary in this build. Cloud or extra local brains can be added as hybrid engines, but they do not replace the bundled brain.';
   }
   return `Portable Core received: "${msg}"\n\nThe clean-machine runtime is active. Data, memory, MCP config, skills, logs, models, and workspaces are stored under:\n${dataRoot}\n\nFor stronger reasoning, connect a local model runner or cloud provider in the connectors panel.`;
 }
@@ -1469,8 +1545,11 @@ async function route(req, res) {
     return json(res, 200, { ok: true, item });
   }
   if (pathname === '/api/memory/search' || pathname === '/api/memory/similar') {
-    const q = (searchParams.get('q') || searchParams.get('to') || '').toLowerCase();
-    return json(res, 200, { ok: true, results: readMemory(120).filter((m) => JSON.stringify(m).toLowerCase().includes(q)).slice(0, 20) });
+    const q = searchParams.get('q') || searchParams.get('to') || '';
+    return json(res, 200, { ok: true, results: searchMemoryItems(q, 20) });
+  }
+  if (pathname === '/mcp/tools' || pathname === '/api/mcp/tools') {
+    return json(res, 200, { ok: true, tools: localToolsList().filter((t) => t.type === 'mcp'), all_tools_endpoint: '/api/tools/list' });
   }
   if (pathname === '/api/mcp/install') {
     const body = await getBody(req);
