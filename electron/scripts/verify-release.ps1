@@ -368,6 +368,14 @@ foreach ($v in $variantsToRun) {
       ($ttsHeader -eq "RIFF/WAVE") -and
       ($ttsAudio.Bytes.Length -gt 1000)
     )
+    $sttResult = Invoke-CoreJson -Method POST -Path "/api/stt" -Body @{ audio_base64 = [Convert]::ToBase64String($ttsAudio.Bytes) } -TimeoutSec 45
+    $nativeSttAvailable = ([string]$voiceStatus.native_stt).ToLowerInvariant() -eq "true"
+    $nativeSttTranscript = [string]$sttResult.transcript
+    $nativeSttPass = (
+      ($nativeSttAvailable -eq $true) -and
+      ($sttResult.ok -eq $true) -and
+      ($nativeSttTranscript.Trim().Length -gt 0)
+    )
 
     $mcpTools = @()
     if ($v.Name -eq "pro" -or $v.Name -eq "consumer-pro-2.6b") {
@@ -399,6 +407,7 @@ foreach ($v in $variantsToRun) {
       ($toolCall.ok -eq $true) -and
       ($actionTools.AllPass -eq $true) -and
       ($nativeTtsPass -eq $true) -and
+      ($nativeSttPass -eq $true) -and
       ($brainSelect.ok -eq $true) -and
       (@($toolsList.tools).Count -gt 0) -and
       ([string]$gateCli -match "403|allow_cli")
@@ -429,6 +438,13 @@ foreach ($v in $variantsToRun) {
         Voices = @($voiceStatus.voices)
         AudioBytes = $ttsAudio.Bytes.Length
         Header = $ttsHeader
+      }
+      NativeStt = [pscustomobject]@{
+        Pass = $nativeSttPass
+        Available = $nativeSttAvailable
+        Engine = $voiceStatus.native_stt_engine
+        Recognizers = @($voiceStatus.recognizers)
+        Transcript = $nativeSttTranscript
       }
       BrainSelectWorked = $brainSelect.ok
       ToolsCount = @($toolsList.tools).Count

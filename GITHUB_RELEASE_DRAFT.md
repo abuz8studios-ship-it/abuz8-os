@@ -22,9 +22,10 @@ and permission-gated desktop tools.
 - Automatic device probe for the machine where the app is running
 - Local mission/Kanban board with persisted task create/move endpoints
 - Native Windows TTS through `/api/tts`, verified by WAV output
+- Native Windows STT through `/api/stt`, verified by local WAV transcription
 - Streaming chat speech through sentence-boundary native TTS with browser
   fallback
-- Browser STT controls where the local Chromium/Edge speech API is available
+- Browser STT fallback where the local Chromium/Edge speech API is available
 - Claude Desktop MCP bridge files stored under the user's own ABUZ8 data folder
 
 No home server, developer workspace, API key, internet connection, or GPU is
@@ -80,7 +81,7 @@ EmbeddedModels: LFM2-2.6B-Exp-Q4_K_M.gguf
 ActionTools: true
 Agentic chat-to-tool path: true
 NativeTts: true
-NativeStt: false
+NativeStt: true
 ```
 
 ## Known Pre-Release Blockers
@@ -90,5 +91,3 @@ NativeStt: false
   the current Windows Sandbox host session stopped executing logon commands.
 - Setup installer still needs an interactive install/uninstall pass on a clean
   Windows VM.
-- Offline native STT is not bundled yet; current STT is browser/OS speech API
-  dependent.

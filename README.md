@@ -16,9 +16,11 @@ and the core tool dispatcher run on the user's machine.
 - Local memory and mission/Kanban board
 - Native Windows TTS endpoint (`/api/tts`) using the bundled local API and the
   buyer's installed Windows voices
+- Native Windows STT endpoint (`/api/stt`) using the bundled local API and the
+  buyer's installed Windows speech recognizer
 - Streaming chat speech: responses are spoken sentence-by-sentence through
   native TTS with browser TTS fallback
-- Browser microphone/STT controls for supported Chromium/Edge environments
+- Browser microphone/STT fallback for supported Chromium/Edge environments
 - MCP bridge for Claude Desktop
 - Docker Desktop MCP import when Docker exposes `docker mcp`
 - Model download plumbing for user-approved local GGUF downloads
@@ -95,14 +97,15 @@ data folder and checks:
 - device probe from the current machine
 - local memory and mission board
 - native Windows TTS returning WAV audio
+- native Windows STT transcribing that WAV through `/api/stt`
 - Claude Desktop MCP bridge
 - tool dispatcher consent gates
 - action tools by observed OS side effects
 - cleanup after verification
 
-Native offline STT is not bundled in this package yet. Full offline STT should
-be added with a packaged recognizer such as Whisper before advertising
-"offline native STT."
+Parakeet/Whisper model assets can be added to the local model shelf for heavier
+speech recognition later, but the default portable release uses Windows native
+speech APIs so the USB build does not depend on a developer Python environment.
 
 ## Contact
 

@@ -596,6 +596,62 @@ function listWindowsTtsVoices() {
   });
 }
 
+function listWindowsSttRecognizers() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve([]);
+    const script = [
+      'Add-Type -AssemblyName System.Speech',
+      '[System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers() | ForEach-Object { $_.Name }'
+    ].join('; ');
+    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 10000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      resolve(String(stdout || '').split(/\r?\n/).map((v) => v.trim()).filter(Boolean));
+    });
+  });
+}
+
+function transcribeWindowsStt(wavBase64) {
+  return new Promise((resolve, reject) => {
+    if (process.platform !== 'win32') return reject(new Error('Native STT is only bundled for Windows in this build.'));
+    const b64 = String(wavBase64 || '').replace(/^data:audio\/\w+;base64,/, '').trim();
+    if (!b64) return reject(new Error('No WAV audio supplied.'));
+    const audio = Buffer.from(b64, 'base64');
+    if (audio.length < 44 || audio.slice(0, 4).toString('ascii') !== 'RIFF' || audio.slice(8, 12).toString('ascii') !== 'WAVE') {
+      return reject(new Error('Native STT expects 16-bit PCM WAV audio.'));
+    }
+    const sttDir = safeMkdir(path.join(dataRoot, 'cache', 'stt'));
+    const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const inputFile = path.join(sttDir, `${id}.wav`);
+    const outputFile = path.join(sttDir, `${id}.txt`);
+    fs.writeFileSync(inputFile, audio);
+    const scriptBody = [
+      'param([string]$InputFile,[string]$OutputFile)',
+      'Add-Type -AssemblyName System.Speech',
+      '$infos = [System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()',
+      'if (-not $infos -or $infos.Count -lt 1) { throw "No Windows speech recognizer is installed." }',
+      '$rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine($infos[0])',
+      '$rec.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))',
+      '$rec.SetInputToWaveFile($InputFile)',
+      '$result = $rec.Recognize([TimeSpan]::FromSeconds(25))',
+      '$text = if ($result) { $result.Text } else { "" }',
+      '[IO.File]::WriteAllText($OutputFile, $text, [Text.Encoding]::UTF8)',
+      '$rec.Dispose()'
+    ].join('; ');
+    const script = `& { ${scriptBody} }`;
+    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, inputFile, outputFile], { windowsHide: true, timeout: 35000 }, (err) => {
+      try { fs.unlinkSync(inputFile); } catch {}
+      if (err) return reject(err);
+      try {
+        const transcript = fs.existsSync(outputFile) ? fs.readFileSync(outputFile, 'utf8').trim() : '';
+        try { fs.unlinkSync(outputFile); } catch {}
+        resolve({ transcript, confidence: transcript ? 0.5 : 0, engine: 'Windows System.Speech DictationGrammar' });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
 function mcpConfigPath() {
   return path.join(dataRoot, 'mcp', 'mcp_servers.json');
 }
@@ -1578,17 +1634,29 @@ async function route(req, res) {
   }
   if (pathname === '/api/voice/status' || pathname === '/api/tts/status') {
     const voices = await listWindowsTtsVoices();
+    const recognizers = await listWindowsSttRecognizers();
     return json(res, 200, {
       ok: true,
       native_tts: process.platform === 'win32' && voices.length > 0,
       native_tts_engine: process.platform === 'win32' ? 'Windows System.Speech/SAPI' : null,
-      native_stt: false,
+      native_stt: process.platform === 'win32' && recognizers.length > 0,
+      native_stt_engine: process.platform === 'win32' ? 'Windows System.Speech DictationGrammar' : null,
       browser_stt: true,
       browser_tts: true,
       streaming_chat_tts: true,
+      recognizers,
       voices,
-      note: 'This build bundles native Windows TTS through the OS speech engine. Offline native STT requires a bundled recognizer such as Whisper and is not included yet.'
+      note: 'This build uses native Windows speech APIs for offline voice in/out when installed on the target machine. Browser speech remains the fallback path.'
     });
+  }
+  if (pathname === '/api/stt' || pathname === '/api/stt/transcribe') {
+    const body = await getBody(req);
+    try {
+      const result = await transcribeWindowsStt(body.audio_base64 || body.wav_base64 || body.audio || body.raw || '');
+      return json(res, 200, { ok: true, ...result });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message, fallback: 'browser-stt' });
+    }
   }
   if (pathname === '/api/tts' || pathname === '/api/tts/stream') {
     const body = await getBody(req);

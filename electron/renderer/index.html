@@ -2773,19 +2773,87 @@ async function send(){
   btn.classList.remove('loading');
 }
 
-/* ── VOICE STT (Web Speech API) ──────────────────────────────────── */
-let osMicListening=false,osMicRec=null;
+/* ── VOICE STT (browser first, native local fallback) ─────────────── */
+let osMicListening=false,osMicRec=null,osNativeMic=null,osNativeChunks=[];
+
+function micButton(on){
+  const btn=document.getElementById('os-mic-btn');
+  if(!btn)return;
+  btn.style.color=on?'var(--emerald)':'var(--gold)';
+  btn.textContent=on?'⏹':'🎙';
+}
+
+function wavFromFloat32(samples, sampleRate){
+  const pcm=new Int16Array(samples.length);
+  for(let i=0;i<samples.length;i++){
+    const s=Math.max(-1,Math.min(1,samples[i]));
+    pcm[i]=s<0?s*0x8000:s*0x7fff;
+  }
+  const buf=new ArrayBuffer(44+pcm.length*2);
+  const v=new DataView(buf);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+pcm.length*2,true);w(8,'WAVE');w(12,'fmt ');
+  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sampleRate,true);
+  v.setUint32(28,sampleRate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,pcm.length*2,true);
+  let o=44;for(let i=0;i<pcm.length;i++,o+=2)v.setInt16(o,pcm[i],true);
+  return new Blob([buf],{type:'audio/wav'});
+}
+
+async function blobToBase64(blob){
+  const arr=await blob.arrayBuffer();
+  let bin='';const bytes=new Uint8Array(arr);
+  for(let i=0;i<bytes.length;i+=0x8000)bin+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+  return btoa(bin);
+}
+
+async function recordNativeWav(ms=5500){
+  const stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
+  const ctx=new AudioContext();
+  const src=ctx.createMediaStreamSource(stream);
+  const proc=ctx.createScriptProcessor(4096,1,1);
+  const chunks=[];
+  proc.onaudioprocess=e=>chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc);proc.connect(ctx.destination);
+  osNativeMic={stream,ctx,proc,src,stop:()=>{}};
+  await new Promise(resolve=>setTimeout(resolve,ms));
+  try{src.disconnect();proc.disconnect();}catch{}
+  stream.getTracks().forEach(t=>t.stop());
+  await ctx.close().catch(()=>{});
+  const total=chunks.reduce((n,c)=>n+c.length,0);
+  const merged=new Float32Array(total);
+  let off=0;for(const c of chunks){merged.set(c,off);off+=c.length;}
+  return wavFromFloat32(merged,ctx.sampleRate);
+}
+
+async function nativeSttOnce(){
+  osMicListening=true;micButton(true);toast('Listening locally…');
+  try{
+    const wav=await recordNativeWav(5500);
+    const audio_base64=await blobToBase64(wav);
+    const r=await fetch('http://localhost:8900/api/stt',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({audio_base64})});
+    const j=await r.json();
+    if(!j.ok)throw new Error(j.error||'Native STT failed');
+    const t=(j.transcript||'').trim();
+    if(t){document.getElementById('input').value=t;send();}
+    else toast('No speech recognized');
+  }catch(e){
+    toast('Native STT: '+e.message);
+  }finally{
+    osMicListening=false;micButton(false);
+  }
+}
+
 function osMicToggle(){
   try{
     if(!window.isSecureContext){toast('Mic needs http:// not file://');return;}
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR){toast('Voice needs Chrome/Edge');return;}
     if(osMicListening){if(osMicRec)osMicRec.stop();return;}
-    const rec=new SR();osMicRec=rec;rec.lang='en-US';rec.interimResults=true;rec.continuous=false;let fin='';
-    rec.onstart=()=>{osMicListening=true;document.getElementById('os-mic-btn').style.color='var(--emerald)';document.getElementById('os-mic-btn').textContent='⏹';};
+    if(!SR)return nativeSttOnce();
+    const rec=new SR();osMicRec=rec;rec.lang='en-US';rec.interimResults=true;rec.continuous=false;let fin='',hadErr=false;
+    rec.onstart=()=>{osMicListening=true;micButton(true);};
     rec.onresult=e=>{fin='';let it='';for(let i=0;i<e.results.length;i++){const r=e.results[i];if(r.isFinal)fin+=r[0].transcript;else it+=r[0].transcript;}document.getElementById('input').value=fin||it;};
-    rec.onerror=()=>{osMicListening=false;document.getElementById('os-mic-btn').style.color='var(--gold)';document.getElementById('os-mic-btn').textContent='🎙';};
-    rec.onend=()=>{osMicListening=false;document.getElementById('os-mic-btn').style.color='var(--gold)';document.getElementById('os-mic-btn').textContent='🎙';const t=(fin||'').trim();if(t)send();};
+    rec.onerror=()=>{hadErr=true;osMicListening=false;micButton(false);nativeSttOnce();};
+    rec.onend=()=>{osMicListening=false;micButton(false);const t=(fin||'').trim();if(t)send();else if(!hadErr)nativeSttOnce();};
     rec.start();
   }catch(e){toast('Mic error: '+e.message);}
 }
