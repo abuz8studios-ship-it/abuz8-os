@@ -366,7 +366,8 @@ foreach ($v in $variantsToRun) {
     $probe = Invoke-CoreJson -Method GET -Path "/api/device/probe" -TimeoutSec 30
     $chat = Invoke-CoreJson -Method POST -Path "/api/chat" -Body @{ content = "One sentence: verify $($v.Name) release brain." } -TimeoutSec 180
     if ($chat.fallback -ne $false) { throw "$($v.Name) used fallback brain" }
-    if ([string]$chat.brain -ne $v.Expected) { throw "$($v.Name) expected '$($v.Expected)' but got '$($chat.brain)'" }
+    if ([string]$chat.brain -ne "ABUZ8 OS Agent") { throw "$($v.Name) expected visible agent 'ABUZ8 OS Agent' but got '$($chat.brain)'" }
+    if ([string]$chat.reasoning_engine -ne $v.Expected) { throw "$($v.Name) expected reasoning engine '$($v.Expected)' but got '$($chat.reasoning_engine)'" }
     $mathChat = Invoke-CoreJson -Method POST -Path "/api/chat" -Body @{ content = "Solve exactly and briefly: If x^2 - 5x + 6 = 0, what are all real x values? Do not use tools." } -TimeoutSec 180
     $mathText = [string]$mathChat.response
     $mathPass = (

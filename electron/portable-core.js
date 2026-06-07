@@ -241,7 +241,8 @@ function localToolsList() {
     { name: 'model_download_hf', type: 'network-model', status: 'permission-gated', description: 'Alias for downloading a user-approved Hugging Face GGUF into the portable data model shelf.' },
     { name: 'cloud_brain_register', type: 'cloud-model', status: 'permission-gated', description: 'Register a user-owned cloud brain endpoint or provider key reference locally.' },
     { name: 'open_url', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an http/https URL in the default browser after Allow actions consent.' },
-    { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, calc, or explorer.' },
+    { name: 'web_search', type: 'network', status: 'ready', description: 'Search the public web for current information and return a short sourced result.' },
+    { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, chrome, edge, browser, calc, or explorer.' },
     { name: 'draw_monkey_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Create a simple monkey drawing in the portable sandbox and open it in Microsoft Paint.' },
     { name: 'screenshot', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Capture the primary screen to the portable data shots folder.' },
     { name: 'file_write', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Write a text file inside the portable data sandbox only.' },
@@ -306,6 +307,12 @@ function normalizeAllowedApp(name) {
     notepad: { file: 'notepad.exe', label: 'Notepad' },
     mspaint: { file: 'mspaint.exe', label: 'Paint' },
     paint: { file: 'mspaint.exe', label: 'Paint' },
+    chrome: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'chrome'], label: 'Google Chrome' },
+    googlechrome: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'chrome'], label: 'Google Chrome' },
+    browser: { file: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', 'https://www.google.com'], label: 'Default browser' },
+    defaultbrowser: { file: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', 'https://www.google.com'], label: 'Default browser' },
+    edge: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'msedge'], label: 'Microsoft Edge' },
+    msedge: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'msedge'], label: 'Microsoft Edge' },
     calc: { file: 'calc.exe', label: 'Calculator' },
     calculator: { file: 'calc.exe', label: 'Calculator' },
     explorer: { file: 'explorer.exe', label: 'File Explorer' }
@@ -326,8 +333,8 @@ async function startProcessDetached(file, args = []) {
 async function actionOpenApp(args = {}) {
   requireActionConsent();
   const app = normalizeAllowedApp(args.name || args.app || args.target || '');
-  if (!app) throw new Error('Unsupported app. Allowed apps: notepad, mspaint, calc, explorer.');
-  const result = await startProcessDetached(app.file, []);
+  if (!app) throw new Error('Unsupported app. Allowed apps: notepad, mspaint, chrome, edge, browser, calc, explorer.');
+  const result = await startProcessDetached(app.file, app.args || []);
   return { ...result, app: app.label };
 }
 
@@ -385,6 +392,89 @@ async function actionOpenUrl(args = {}) {
   const url = normalizeHttpUrl(args.url || args.href || args.query);
   const result = await startProcessDetached('rundll32.exe', ['url.dll,FileProtocolHandler', url]);
   return { ...result, browser: 'default', url };
+}
+
+function fetchJsonUrl(url, timeout = 12000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'user-agent': 'ABUZ8-OS-Agent/1.0' } }, (r) => {
+      let data = '';
+      r.setEncoding('utf8');
+      r.on('data', (d) => { data += d; if (data.length > 1024 * 1024) req.destroy(new Error('response too large')); });
+      r.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error(`invalid JSON from web search: ${e.message}`)); }
+      });
+    });
+    req.setTimeout(timeout, () => req.destroy(new Error('web search timeout')));
+    req.on('error', reject);
+  });
+}
+
+function fetchTextUrl(url, timeout = 12000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'user-agent': 'ABUZ8-OS-Agent/1.0' } }, (r) => {
+      let data = '';
+      r.setEncoding('utf8');
+      r.on('data', (d) => { data += d; if (data.length > 1024 * 1024) req.destroy(new Error('response too large')); });
+      r.on('end', () => resolve(data));
+    });
+    req.setTimeout(timeout, () => req.destroy(new Error('web fetch timeout')));
+    req.on('error', reject);
+  });
+}
+
+function decodeXmlText(text) {
+  return String(text || '')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'");
+}
+
+function parseRssItems(xml, limit = 5) {
+  return [...String(xml || '').matchAll(/<item\b[\s\S]*?<\/item>/gi)].slice(0, limit).map((m) => {
+    const item = m[0];
+    const title = decodeXmlText((item.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || '').trim();
+    const link = decodeXmlText((item.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '').trim();
+    const pubDate = decodeXmlText((item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i) || [])[1] || '').trim();
+    return { title, url: link, pubDate };
+  }).filter((x) => x.title);
+}
+
+async function actionWebSearch(args = {}) {
+  const query = String(args.query || args.q || args.prompt || '').trim();
+  if (!query) throw new Error('web_search requires query.');
+  if (/\b(news|latest|current|today|recent)\b/i.test(query)) {
+    try {
+      const rssUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss`;
+      const xml = await fetchTextUrl(rssUrl);
+      const items = parseRssItems(xml, 5);
+      if (items.length) {
+        return {
+          query,
+          source: 'Bing News RSS',
+          answer: `Top current results for "${query}":`,
+          url: rssUrl,
+          related: items.map((x) => ({ text: `${x.title}${x.pubDate ? ` (${x.pubDate})` : ''}`, url: x.url }))
+        };
+      }
+    } catch {}
+  }
+  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`;
+  const data = await fetchJsonUrl(url);
+  const related = Array.isArray(data.RelatedTopics)
+    ? data.RelatedTopics.flatMap((t) => t.Topics || [t]).filter((t) => t && (t.Text || t.FirstURL)).slice(0, 5)
+    : [];
+  return {
+    query,
+    source: 'DuckDuckGo Instant Answer',
+    answer: data.AbstractText || data.Answer || '',
+    heading: data.Heading || '',
+    url: data.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
+    related: related.map((t) => ({ text: t.Text || '', url: t.FirstURL || '' }))
+  };
 }
 
 function sandboxFilePath(relpath) {
@@ -497,6 +587,9 @@ async function callLocalTool(name, args = {}) {
   }
   if (isTool('open_url')) {
     return { ok: true, tool: toolName, result: await actionOpenUrl(body) };
+  }
+  if (isTool('web_search', 'search_web', 'internet_search')) {
+    return { ok: true, tool: toolName, result: await actionWebSearch(body) };
   }
   if (isTool('open_app')) {
     return { ok: true, tool: toolName, result: await actionOpenApp(body) };
@@ -1047,7 +1140,9 @@ async function ensureEmbeddedBrain() {
 
 function agentToolInstructions() {
   return [
-    'You are ABUZ8 OS Pro, a consumer desktop agent running fully local on CPU.',
+    'You are ABUZ8 OS Agent, a consumer desktop agent running on this device.',
+    'The mind framework controls memory, tasks, personality, and project missions. The embedded LFM model is only an internal reasoning engine; never identify yourself as the LFM brain.',
+    `Current device time is ${new Date().toString()}.`,
     'You can request exactly one tool call by returning ONLY compact JSON in this shape:',
     '{"tool":"tool_name","args":{}}',
     'If no tool is needed, return normal helpful text.',
@@ -1058,8 +1153,9 @@ function agentToolInstructions() {
     '- abuz8_mission_task_create {"title":"...","column":"ready","priority":"medium","details":"..."}',
     '- model_download_hf {"repo":"org/repo","file":"model.gguf","allow_network_download":true}',
     '- cloud_brain_register {"provider":"openai|anthropic|custom","endpoint":"https://...","model":"...","api_key_env":"ENV_NAME","allow_cloud_brain":true}',
+    '- web_search {"query":"current topic"}',
     '- open_url {"url":"https://example.com"}',
-    '- open_app {"name":"notepad|mspaint|calc|explorer"}',
+    '- open_app {"name":"notepad|mspaint|chrome|edge|browser|calc|explorer"}',
     '- screenshot {}',
     '- file_write {"relpath":"notes/example.txt","content":"..."}',
     '- shell_run {"cmd":"whoami|hostname|dir"}',
@@ -1074,7 +1170,15 @@ async function embeddedReply(prompt, opts = {}) {
   const brain = activeBrain || selectEmbeddedBrain();
   const modelPrompt = opts.agentic
     ? `${agentToolInstructions()}\nUser: ${prompt}\nAssistant:`
-    : `You are ABUZ8 OS Portable Brain running ${brain?.name || 'an embedded LFM model'}. Be concise, practical, and tool-aware.\n\nUser: ${prompt}\nAssistant:`;
+    : [
+      'You are ABUZ8 OS Agent. Speak as the agent, not as a model.',
+      'The framework is the mind: memory, tasks, personality, and project missions. The embedded LFM model is just an internal reasoning engine.',
+      `Current device time is ${new Date().toString()}.`,
+      'Be concise, clear, practical, and calm. If the user asks for current outside information and no tool result is provided, say you need web search.',
+      '',
+      `User: ${prompt}`,
+      'Assistant:'
+    ].join('\n');
   for (let i = 0; i < 3; i++) {
     try {
       const out = await httpJson('POST', LFM_PORT, '/completion', {
@@ -1084,7 +1188,8 @@ async function embeddedReply(prompt, opts = {}) {
         stop: ['User:', '\n\nUser:']
       }, 90000);
       const textOut = out.content || out.response || out.text || '';
-      if (String(textOut).trim()) return String(textOut).trim();
+      const cleaned = cleanAgentText(textOut);
+      if (cleaned) return cleaned;
     } catch (e) {
       lastLfmError = e.message;
     }
@@ -1096,13 +1201,29 @@ async function embeddedReply(prompt, opts = {}) {
         stop: ['User:', '\n\nUser:']
       }, 90000);
       const textOut = out.choices && out.choices[0] ? out.choices[0].text : '';
-      if (String(textOut).trim()) return String(textOut).trim();
+      const cleaned = cleanAgentText(textOut);
+      if (cleaned) return cleaned;
     } catch (e) {
       lastLfmError = e.message;
     }
     await new Promise((resolve) => setTimeout(resolve, 900));
   }
   return null;
+}
+
+function cleanAgentText(text) {
+  let out = String(text || '').replace(/\r/g, '').trim();
+  const responseBlock = out.match(/<response>\s*([\s\S]*?)\s*<\/response>/i);
+  if (responseBlock) out = responseBlock[1].trim();
+  out = out.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<tool>[\s\S]*?<\/tool>/gi, '').trim();
+  out = out.replace(/^Assistant:\s*/i, '').replace(/^ABUZ8 OS Agent:\s*/i, '').trim();
+  out = out.replace(/\n?User:\s*[\s\S]*$/i, '').trim();
+  out = out.replace(/\b(LFM2?|Liquid Foundation Model)\s*(2\.6B|brain|model)?\b/gi, 'embedded reasoning engine');
+  const words = out.split(/\s+/).filter(Boolean);
+  const weird = (out.match(/[^\x09\x0a\x0d\x20-\x7e]/g) || []).length;
+  if (out.length < 2 || weird > Math.max(12, out.length * 0.18)) return '';
+  if (words.length > 8 && new Set(words.slice(0, 40).map((w) => w.toLowerCase())).size < 4) return '';
+  return out;
 }
 
 function extractJsonObject(text) {
@@ -1155,6 +1276,9 @@ function inferConsumerToolCall(prompt) {
   if (lower === '/probe' || /\b(probe|scan|check)\b.*\b(device|computer|system|machine|hardware)\b/.test(lower)) {
     return { tool: 'abuz8_device_probe', args: {} };
   }
+  if (/\b(open|launch|start)\b.*\b(chrome|google chrome)\b/.test(lower)) return { tool: 'open_app', args: { name: 'chrome' } };
+  if (/\b(open|launch|start)\b.*\b(edge|microsoft edge)\b/.test(lower)) return { tool: 'open_app', args: { name: 'edge' } };
+  if (/\b(open|launch|start)\b.*\b(browser|web browser)\b/.test(lower)) return { tool: 'open_app', args: { name: 'browser' } };
   if (/\b(draw|paint|create)\b.*\bmonkey\b/.test(lower) && /\b(paint|mspaint|microsoft paint)\b/.test(lower)) {
     return { tool: 'draw_monkey_in_paint', args: { caption: 'ABUZ8 OS local desktop action proof' } };
   }
@@ -1165,9 +1289,9 @@ function inferConsumerToolCall(prompt) {
   if (/\b(screenshot|screen shot|capture screen)\b/.test(lower)) return { tool: 'screenshot', args: {} };
   const urlMatch = msg.match(/\bhttps?:\/\/[^\s"'<>]+/i);
   if (urlMatch && /\b(open|visit|go to|browse)\b/i.test(msg)) return { tool: 'open_url', args: { url: urlMatch[0] } };
-  if (/\b(search|look up|google|duckduckgo)\b.*\b(web|internet|online)\b/i.test(msg)) {
+  if (/\b(search|look up|google|duckduckgo|internet|online|current|latest|today|news|who is|what is)\b/i.test(msg)) {
     const q = msg.replace(/\b(search|look up|google|duckduckgo|the|web|internet|online|for)\b/gi, ' ').replace(/\s+/g, ' ').trim();
-    if (q) return { tool: 'open_url', args: { url: `https://duckduckgo.com/?q=${encodeURIComponent(q)}` } };
+    if (q) return { tool: 'web_search', args: { query: q } };
   }
   if (/\b(hostname|machine name)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'hostname' } };
   if (/\b(whoami|current user)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'whoami' } };
@@ -1180,6 +1304,13 @@ function summarizeToolResult(tool, result) {
   if (tool === 'open_app') return `Done. Opened ${payload.app || payload.file || 'the requested app'}.`;
   if (tool === 'draw_monkey_in_paint') return `Done. Drew a monkey image and opened it in Paint: ${payload.file}.`;
   if (tool === 'open_url') return `Done. Opened ${payload.url || 'the requested URL'} in the default browser.`;
+  if (tool === 'web_search') {
+    const lines = [];
+    if (payload.answer) lines.push(payload.answer);
+    if (payload.related && payload.related.length) lines.push(payload.related.slice(0, 3).map((r, i) => `${i + 1}. ${r.text}`).join('\n'));
+    lines.push(`Source: ${payload.url || payload.source || 'web search'}`);
+    return lines.filter(Boolean).join('\n\n');
+  }
   if (tool === 'screenshot') return `Done. Screenshot saved to ${payload.file}.`;
   if (tool === 'file_write') return `Done. Wrote ${payload.bytes || 0} bytes to ${payload.file}.`;
   if (tool === 'shell_run') return `Done.\n\n${String(payload.stdout || '').trim()}`;
@@ -1192,6 +1323,9 @@ function summarizeToolResult(tool, result) {
 
 async function agenticReply(prompt, opts = {}) {
   const direct = inferConsumerToolCall(prompt);
+  if (!direct && /\b(date|time|today|now)\b/i.test(String(prompt || ''))) {
+    return { response: localReply(prompt), modelResponse: null, tool_call: null, tool_result: null, fallback: false };
+  }
   if (!direct) {
     const modelResponse = await embeddedReply(prompt, { agentic: false });
     return { response: modelResponse || localReply(prompt), modelResponse, tool_call: null, tool_result: null, fallback: !modelResponse };
@@ -1224,6 +1358,9 @@ function localReply(prompt) {
   const msg = String(prompt || '').trim();
   const lower = msg.toLowerCase();
   if (!msg) return 'Portable Core is online. Type a task, ask for a file operation, or import MCP connectors from the Migration view.';
+  if (/\b(date|time|today|now)\b/.test(lower)) {
+    return `It is ${new Date().toLocaleString()} on this computer.`;
+  }
   if (lower.includes('mcp') || lower.includes('connector')) {
     return `Portable Core is online. Use Migration -> Import Local Connectors to copy Claude Desktop MCP entries into ${mcpConfigPath()}. Docker MCP is imported when Docker Desktop exposes "docker mcp".`;
   }
@@ -1233,7 +1370,7 @@ function localReply(prompt) {
   if (lower.includes('model') || lower.includes('brain')) {
     return 'The native LFM2 2.6B GGUF brain stays primary in this build. Cloud or extra local brains can be added as hybrid engines, but they do not replace the bundled brain.';
   }
-  return `Portable Core received: "${msg}"\n\nThe clean-machine runtime is active. Data, memory, MCP config, skills, logs, models, and workspaces are stored under:\n${dataRoot}\n\nFor stronger reasoning, connect a local model runner or cloud provider in the connectors panel.`;
+  return `I received: "${msg}"\n\nThe local agent core is active. Memory, MCP config, skills, logs, models, and workspaces are stored only on this device under:\n${dataRoot}\n\nIf this needs current outside information, ask me to search the web or use the Migration view to connect your own providers.`;
 }
 
 function sendSse(res, payload, brain = 'Portable Core') {
@@ -1497,13 +1634,15 @@ async function route(req, res) {
     const embedded = embeddedBrainStatus();
     return json(res, 200, {
       ok: true,
-      service: 'portable-core',
-      primary_brain: embedded.embedded ? embedded.name : 'Portable Core',
-      brain: embedded.embedded ? embedded.name : 'Portable Core',
+      service: 'abuz8-agent-core',
+      primary_brain: embedded.embedded ? embedded.name : 'Local reasoning engine',
+      brain: 'ABUZ8 OS Agent',
+      agent: 'ABUZ8 OS Agent',
       latency_ms: 1,
       memory_count: readMemory(200).length,
       data_root: dataRoot,
       mcp_config: mcpConfigPath(),
+      current_time: new Date().toISOString(),
       embedded_brain: embedded
     });
   }
@@ -1525,11 +1664,12 @@ async function route(req, res) {
       timestamp: new Date().toISOString()
     });
     const embedded = embeddedBrainStatus();
-    if (pathname.endsWith('/stream')) return sendSse(res, response, result.modelResponse ? embedded.name : 'Portable Core');
+    if (pathname.endsWith('/stream')) return sendSse(res, response, 'ABUZ8 OS Agent');
     return json(res, 200, {
       ok: true,
       response,
-      brain: result.modelResponse ? embedded.name : 'Portable Core',
+      brain: 'ABUZ8 OS Agent',
+      reasoning_engine: result.modelResponse ? embedded.name : 'Portable Core',
       latency_ms: result.modelResponse ? null : 1,
       embedded_brain: embedded,
       fallback: Boolean(result.fallback),
@@ -1568,6 +1708,22 @@ async function route(req, res) {
   }
   if (pathname === '/api/device/probe' || pathname === '/api/capabilities/probe') {
     return json(res, 200, await machineProbe());
+  }
+  if (pathname === '/api/mind/status') {
+    const board = readMissionBoard();
+    return json(res, 200, {
+      ok: true,
+      agent: 'ABUZ8 OS Agent',
+      current_time: new Date().toISOString(),
+      framework: 'four-layer local mind',
+      layers: [
+        { id: 'memory', name: 'Memory', status: 'ready', count: readMemory(500).length, storage: path.join(dataRoot, 'memory') },
+        { id: 'tasks', name: 'Tasks', status: 'ready', summary: missionSummary(board), storage: missionFile() },
+        { id: 'personality', name: 'Personality', status: 'ready', active: readRuntimeConfig().active_soul || 'default', storage: path.join(dataRoot, 'config') },
+        { id: 'missions', name: 'Project missions', status: 'ready', columns: Object.fromEntries(Object.entries(board.columns || {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])), storage: path.join(dataRoot, 'mission') }
+      ],
+      data_root: dataRoot
+    });
   }
   if (pathname === '/api/optional-probe') {
     return json(res, 200, { ok: false, optional: true, manual: true, port: searchParams.get('port') || null });
@@ -1893,8 +2049,25 @@ async function route(req, res) {
     });
   }
   if (pathname === '/api/sessions/summary') return json(res, 200, { ok: true, sessions: [] });
-  if (pathname === '/api/souls/list') return json(res, 200, { ok: true, souls: ['portable-core'] });
-  if (pathname === '/api/souls/active') return json(res, 200, { ok: true });
+  if (pathname === '/api/souls/list') {
+    const cfg = readRuntimeConfig();
+    return json(res, 200, {
+      ok: true,
+      active: cfg.active_soul || 'default',
+      souls: [
+        { name: 'default', display_name: 'Default Agent', role: 'calm practical desktop operator' },
+        { name: 'operator', display_name: 'Operator', role: 'tool-first desktop control and verification' },
+        { name: 'researcher', display_name: 'Researcher', role: 'web-aware question answering and source gathering' },
+        { name: 'builder', display_name: 'Builder', role: 'projects, tasks, and implementation planning' }
+      ]
+    });
+  }
+  if (pathname === '/api/souls/active') {
+    const body = await getBody(req);
+    const soul = slug(body.soul || body.name || 'default') || 'default';
+    writeRuntimeConfigPatch({ active_soul: soul });
+    return json(res, 200, { ok: true, active: soul, session_only: false });
+  }
   if (pathname === '/api/telegram/send') return json(res, 200, { ok: false, error: 'Telegram is not configured in portable mode.' });
 
   return json(res, 404, { ok: false, error: `No portable-core endpoint for ${pathname}` });

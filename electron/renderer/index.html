@@ -898,9 +898,60 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
 .sal-tooltip b{color:var(--gold)}
 
 
+/* ===== CONSUMER SIMPLE MODE ===== */
+body.simple-mode{
+  --bg:#edf7ee;--bg2:#e4f2e8;--panel:rgba(247,252,248,.94);--panel2:rgba(255,255,255,.97);
+  --surface:rgba(255,255,255,.96);--surface2:rgba(245,252,248,.98);--surface3:rgba(250,253,250,.98);
+  --card:rgba(255,255,255,.98);--card-hi:#ffffff;
+  --border:rgba(58,119,88,.20);--border-strong:rgba(28,150,97,.32);
+  --line:rgba(95,140,105,.28);--line2:rgba(28,150,97,.22);
+  --gold:#8f6f22;--gold2:#5b4615;--gold-dim:#9a7c34;--gold-glow:rgba(166,130,37,.10);
+  --emerald:#2db978;--emerald2:#16875a;--cyan:#2878a8;--violet:#6d55b7;--rose:#b94f5c;
+  --text:#17231d;--text2:#203028;--text3:#64766c;--ghost:#9cab9f;
+  --green:#2db978;--amber:#8f6f22;--red:#b94f5c;--gray:#64766c;
+  --green-bg:rgba(45,185,120,.12);--amber-bg:rgba(143,111,34,.10);--red-bg:rgba(185,79,92,.12);
+  --shadow:0 18px 50px rgba(27,55,38,.10);
+}
+body.simple-mode:before{background:linear-gradient(135deg,#f3faf4,#e4f2e8 55%,#f9fbf5)}
+body.simple-mode:after,.simple-mode .bg-wallpaper,.simple-mode .bg-noise,.simple-mode #pandora-bg{display:none!important}
+body.simple-mode .os{grid-template-rows:58px 1fr 0}
+body.simple-mode .topbar{grid-template-columns:250px 1fr 320px;padding:8px 14px;background:rgba(255,255,255,.76);border-bottom:1px solid var(--border)}
+body.simple-mode .brand p{color:var(--text3);letter-spacing:.08em}
+body.simple-mode .seal{border-radius:12px;background:linear-gradient(145deg,#dff3e4,#ffffff);color:var(--emerald2);box-shadow:none}
+body.simple-mode .command{background:#fff;border-color:var(--border);box-shadow:none}
+body.simple-mode .main{grid-template-columns:176px minmax(0,1fr);gap:10px;padding:10px 14px 14px}
+body.simple-mode .rail{display:none}
+body.simple-mode .sidebar{gap:8px}
+body.simple-mode .side-block{box-shadow:none;border-radius:12px;background:rgba(255,255,255,.82);padding:8px}
+body.simple-mode .side-block:nth-of-type(2),body.simple-mode .side-block:nth-of-type(3),body.simple-mode .side-block:nth-of-type(4),body.simple-mode .side-block:nth-of-type(6){display:none}
+body.simple-mode .mode-toggle{grid-template-columns:1fr!important}
+body.simple-mode .mode-btn{border-radius:8px;background:#fff;color:var(--text3);padding:8px 9px;text-align:left}
+body.simple-mode .mode-btn.on{background:var(--green-bg);color:var(--emerald2);border-color:var(--emerald)}
+body.simple-mode .center{border-radius:16px;background:#fff;box-shadow:0 18px 54px rgba(27,55,38,.12)}
+body.simple-mode .chat-top{height:54px;background:#fff;padding:0 18px}
+body.simple-mode .agent-label{color:var(--emerald2);font-family:var(--font);font-size:16px}
+body.simple-mode #thread{max-width:820px;padding:32px 34px 22px}
+body.simple-mode .m-body{font-size:15px;line-height:1.7;color:var(--text)}
+body.simple-mode .msg.ai .m-av{background:var(--green-bg);border-color:rgba(45,185,120,.22);color:var(--emerald2)}
+body.simple-mode .msg.user .m-body{background:#f5fbf6;border-color:rgba(45,185,120,.18);color:var(--text)}
+body.simple-mode #chimera-panel,body.simple-mode #artifacts{display:none!important}
+body.simple-mode .ibar{background:#fff;padding:12px calc(50% - 410px);border-top:1px solid var(--border)}
+body.simple-mode #input{background:#fff;border-color:rgba(45,185,120,.28);border-radius:18px;color:var(--text);font-size:15px;min-height:48px}
+body.simple-mode #send-btn{background:var(--emerald);border-color:var(--emerald);color:white;width:40px;height:40px}
+body.simple-mode .dock{display:none}
+body.simple-mode .onb-card{background:#fff;color:var(--text);border-color:rgba(45,185,120,.22)}
+body.simple-mode .onb-sub,.simple-mode .ft p{color:var(--text3)}
+body.simple-mode .onb-title{color:var(--emerald2)}
+@media(max-width:900px){
+  body.simple-mode .topbar{grid-template-columns:1fr;grid-auto-rows:auto;height:auto}
+  body.simple-mode .status-row{justify-content:flex-start;flex-wrap:wrap}
+  body.simple-mode .main{grid-template-columns:1fr}
+  body.simple-mode .sidebar{display:none}
+  body.simple-mode .ibar{padding:10px 12px}
+}
 </style>
 </head>
-<body>
+<body class="simple-mode">
 
 <div class="bg-wallpaper"></div>
 <div class="bg-noise"></div>
@@ -926,17 +977,17 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
 <div id="onb-overlay">
   <div class="onb-card">
     <div class="onb-step on" data-step="0">
-      <div class="onb-eyebrow">ABUZ8 OS Pro · v1.0</div>
-      <div class="onb-title">✧ Welcome to ABUZ8 OS</div>
-      <div class="onb-sub">This is a local AI desktop agent for regular people: it opens with its own front end, local tool server, memory, mission board, MCP bridge, and bundled <b>LFM2 2.6B Pro</b> CPU brain. No home server is required.</div>
-      <div class="onb-feat"><div class="ico">🧠</div><div class="ft"><b>Bundled brain</b><p>The Pro build carries the 2.6B GGUF model and llama.cpp runtime inside the app package.</p></div></div>
-      <div class="onb-feat"><div class="ico">🖥️</div><div class="ft"><b>Agent tools</b><p>After you allow actions, it can open apps, open web pages, capture screenshots, write sandboxed files, and run safe system probes.</p></div></div>
-      <div class="onb-feat"><div class="ico">🔒</div><div class="ft"><b>Your machine</b><p>Memory, missions, connectors, downloaded models, and settings live in the portable data folder.</p></div></div>
+      <div class="onb-eyebrow">ABUZ8 OS Consumer Pro · v1.0</div>
+      <div class="onb-title">Welcome. Let’s set up this computer.</div>
+      <div class="onb-sub">This app starts its own local agent core, chat face, memory, mission board, MCP bridge, and bundled offline reasoning engine. It learns this device at first launch; it does not import another machine’s private memory.</div>
+      <div class="onb-feat"><div class="ico">✓</div><div class="ft"><b>Local first</b><p>Runs on this Windows computer with its own port, local data folder, and embedded 2.6B GGUF engine.</p></div></div>
+      <div class="onb-feat"><div class="ico">↗</div><div class="ft"><b>Connectors are doors</b><p>Gmail, Google, Claude, Docker, GitHub, and social tools need your own sign-in, token, or local app running.</p></div></div>
+      <div class="onb-feat"><div class="ico">🔒</div><div class="ft"><b>Device-only data</b><p>Memory, missions, souls, connectors, downloaded models, and settings save on the device running the app.</p></div></div>
     </div>
     <div class="onb-step" data-step="1">
-      <div class="onb-eyebrow">Step 1 · Brains</div>
-      <div class="onb-title">Your brain shelf</div>
-      <div class="onb-sub">The bundled 2.6B brain starts locally. You can also add user-approved GGUF files or register your own cloud model endpoints later.</div>
+      <div class="onb-eyebrow">Step 1 · Engine</div>
+      <div class="onb-title">The brain is inside. The agent is the face.</div>
+      <div class="onb-sub">The app answers as ABUZ8 OS Agent. The bundled local model is only one reasoning engine inside the four-layer mind.</div>
       <div id="onb-brains"><div style="font-size:12px;color:var(--text3)">Detecting engines…</div></div>
     </div>
     <div class="onb-step" data-step="2">
@@ -946,29 +997,29 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
       <div id="onb-device-probe"><div style="font-size:12px;color:var(--text3)">Scanning this device…</div></div>
     </div>
     <div class="onb-step" data-step="3">
-      <div class="onb-eyebrow">Step 3 · Layout</div>
-      <div class="onb-title">What is inside</div>
-      <div class="onb-sub">The app is organized around the daily work loop:</div>
-      <div class="onb-feat"><div class="ico">🌌</div><div class="ft"><b>HUD</b><p>Cinematic widget desktop — boss avatar, mission hero, brain monitor, CRM.</p></div></div>
-      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>CHAT</b><p>3-column Claude-desktop. Thread + artifacts + sources/memory/tools rail.</p></div></div>
-      <div class="onb-feat"><div class="ico">📊</div><div class="ft"><b>WORK</b><p>Mission Control. KPIs + portfolio of every product/asset you own.</p></div></div>
-      <div class="onb-feat"><div class="ico">🧭</div><div class="ft"><b>REF</b><p>Reference panel. Agentic framework comparison, your sovereign edge.</p></div></div>
+      <div class="onb-eyebrow">Step 3 · Mind Structure</div>
+      <div class="onb-title">Four layers, simple controls</div>
+      <div class="onb-sub">The framework is the mind. You can program it without editing code:</div>
+      <div class="onb-feat"><div class="ico">1</div><div class="ft"><b>Memory</b><p>What the agent should remember on this device.</p></div></div>
+      <div class="onb-feat"><div class="ico">2</div><div class="ft"><b>Tasks</b><p>Work items and follow-ups the agent can organize.</p></div></div>
+      <div class="onb-feat"><div class="ico">3</div><div class="ft"><b>Personality / Soul</b><p>Default, Operator, Researcher, or Builder behavior.</p></div></div>
+      <div class="onb-feat"><div class="ico">4</div><div class="ft"><b>Project Missions</b><p>Longer goals and project boards stored locally.</p></div></div>
     </div>
     <div class="onb-step" data-step="4">
       <div class="onb-eyebrow">Step 4 · Try it</div>
       <div class="onb-title">Take it for a spin</div>
       <div class="onb-sub">Pick one. Desktop and web actions require the session Allow actions switch so the app cannot operate the computer silently.</div>
-      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Open Notepad'))"><span class="tt">DESKTOP</span>Open Notepad</button>
-      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Search the web for latest AI agent news'))"><span class="tt">WEB</span>Search the web</button>
+      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Open Chrome'))"><span class="tt">DESKTOP</span>Open Chrome</button>
+      <button class="onb-try" onclick="onbTry('Search the web for latest AI agent news')"><span class="tt">WEB</span>Search the web</button>
       <button class="onb-try" onclick="onbTry('/probe')"><span class="tt">SYSTEM</span>Probe this device</button>
     </div>
     <div class="onb-step" data-step="5">
       <div class="onb-eyebrow">You're set</div>
       <div class="onb-title">Ready ✦</div>
-      <div class="onb-sub">Type in the command bar or chat. Press <b>Ctrl+K</b> from anywhere. Re-open this guide with the <b>?</b> in the topbar.</div>
-      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>Plain language</b><p>"Open Paint." "Take a screenshot." "Remember my supplier list."</p></div></div>
-      <div class="onb-feat"><div class="ico">👁️</div><div class="ft"><b>Watch it work</b><p>The Tools rail shows available tools and permission state.</p></div></div>
-      <div class="onb-feat"><div class="ico">⚡</div><div class="ft"><b>Extend it</b><p>Import MCP connectors, add local GGUF brains, or register cloud brains with your own keys.</p></div></div>
+      <div class="onb-sub">Type in the command bar or chat. Re-open this guide with the <b>?</b> in the topbar.</div>
+      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>Plain language</b><p>“Open Chrome.” “Search the web.” “Remember my supplier list.” “Probe this device.”</p></div></div>
+      <div class="onb-feat"><div class="ico">👁️</div><div class="ft"><b>Permissioned control</b><p>Desktop actions require Allow Actions each session. Chat and memory work without that switch.</p></div></div>
+      <div class="onb-feat"><div class="ico">⚡</div><div class="ft"><b>Extend it</b><p>Use Migrate to import MCP connectors, add local GGUF brains, or register cloud brains with your own keys.</p></div></div>
     </div>
     <div class="onb-foot">
       <button class="onb-btn ghost" onclick="onbSkip()">Skip</button>
@@ -1000,11 +1051,11 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
           <div class="org-item" data-org="team" onclick="setOrg('team','Team Workspace')">
             <span class="org-dot"></span><span>Team Workspace</span><span class="org-tag">PRO</span>
           </div>
-          <div class="org-item" data-org="goldman" onclick="setOrg('goldman','Goldman Sachs Demo')" style="display:none">
-            <span class="org-dot"></span><span>Goldman Sachs (demo)</span><span class="org-tag">ENT</span>
+          <div class="org-item" data-org="enterprise-a" onclick="setOrg('enterprise-a','Enterprise Demo A')" style="display:none">
+            <span class="org-dot"></span><span>Enterprise Demo A</span><span class="org-tag">ENT</span>
           </div>
-          <div class="org-item" data-org="pfizer" onclick="setOrg('pfizer','Pfizer R&amp;D Demo')" style="display:none">
-            <span class="org-dot"></span><span>Pfizer R&amp;D (demo)</span><span class="org-tag">ENT</span>
+          <div class="org-item" data-org="enterprise-b" onclick="setOrg('enterprise-b','Enterprise Demo B')" style="display:none">
+            <span class="org-dot"></span><span>Enterprise Demo B</span><span class="org-tag">ENT</span>
           </div>
           <div class="org-sep"></div>
           <div class="org-item add" onclick="newOrg()" style="opacity:0.5"><span>＋ New Workspace · soon</span></div>
@@ -1092,8 +1143,8 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
       <div class="side-block">
         <div class="side-hdr">View Mode</div>
         <div class="mode-toggle" style="grid-template-columns:repeat(3,1fr)">
-          <button class="mode-btn on" data-view="hud" onclick="setView('hud',this)">HUD</button>
-          <button class="mode-btn" data-view="chat" onclick="setView('chat',this)">Chat</button>
+          <button class="mode-btn" data-view="hud" onclick="setView('hud',this)">HUD</button>
+          <button class="mode-btn on" data-view="chat" onclick="setView('chat',this)">Chat</button>
           <button class="mode-btn" data-view="work" onclick="setView('work',this)">Work</button>
           <button class="mode-btn" data-view="neoc" onclick="setView('neoc',this)" title="Neocortex Brain Map">Neoc</button>
           <button class="mode-btn" data-view="skills" onclick="setView('skills',this)" title="Skills Marketplace">Skills</button>
@@ -1115,7 +1166,7 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
     <section class="center">
 
       <!-- VIEW: HUD -->
-      <div class="view on" id="view-hud">
+      <div class="view" id="view-hud">
         <div class="hud-desktop">
           <!-- Avatar widget -->
           <div class="widget boss-w">
@@ -1208,11 +1259,11 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
       </div>
 
       <!-- VIEW: CHAT -->
-      <div class="view" id="view-chat">
+      <div class="view on" id="view-chat">
         <div class="chat-view">
           <div class="chat-top">
-            <div class="agent-label" id="agent-label">✧ Portable Core</div>
-            <span class="agent-port-label" id="agent-port-label">:8900 · auto-route</span>
+            <div class="agent-label" id="agent-label">ABUZ8 OS Agent</div>
+            <span class="agent-port-label" id="agent-port-label">:8900 · local mind + tools</span>
             <select id="brain-tier-sel" onchange="selectEmbeddedBrainUI(this.value)" title="Active embedded brain" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:5px 8px;font:10px var(--mono);max-width:170px">
               <option value="auto">Brain: auto</option>
             </select>
@@ -1232,8 +1283,8 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
             <div class="msg ai">
               <div class="m-av">Q</div>
               <div>
-                <div class="m-body">Bismillah. ABUZ8 OS online. Portable Core is running on 8900. Type below or use the command bar anywhere in the OS.</div>
-                <div class="m-meta">qadir · boot</div>
+                <div class="m-body">ABUZ8 OS Agent is online on this computer. Ask normally, or say things like “open Chrome,” “search the web,” “remember this,” or “probe this device.”</div>
+                <div class="m-meta">agent · local core :8900</div>
               </div>
             </div>
           </div>
@@ -1250,12 +1301,12 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
           <div class="ibar">
             <span class="kbd-hint">⌘K</span>
             <select id="agent-sel" onchange="agentSelChange(this)">
-              <option value="qadir">Qadir :8900</option>
+              <option value="qadir">ABUZ8 Agent :8900</option>
               <option value="soloman">Mission Agent :8910</option>
               <option value="hermes">Hermes :9119</option>
               <option value="zait">OpenClaw :18789</option>
             </select>
-            <textarea id="input" placeholder="Message Qadir… (/ for skills, @brain, #memory)" rows="1" onkeydown="inputKey(event)"></textarea>
+            <textarea id="input" placeholder="Ask the agent anything. It can use memory, tools, and web search when needed." rows="1" onkeydown="inputKey(event)"></textarea>
             <select id="voice-picker" onchange="changeVoice(this.value)" title="TTS Voice" style="background:var(--card);color:var(--text3);border:1px solid var(--border);border-radius:8px;padding:4px 6px;font:10px var(--mono);max-width:120px;cursor:pointer"><option>Loading voices…</option></select>
             <button id="os-mic-btn" onclick="osMicToggle()" title="Voice input" style="background:none;border:1px solid var(--border);border-radius:10px;color:var(--gold);padding:6px 10px;cursor:pointer;font-size:14px">🎙</button>
             <button id="send-btn" onclick="send()">▶</button>
@@ -2146,19 +2197,19 @@ body.pro .audit-table tr:nth-child(even) td{background:#F8F7F5}
 <script>
 /* ================================================================
    ABUZ8 OS · Portable Agentic Desktop
-   Fusion of: Qadir HUD + Masterful TUI + Mission Control + Framework Ref
-   Wired: bundled Portable Core (8900) live · external brains optional
+   Fusion of: Masterful TUI + Mission Control + Framework Ref
+   Wired: bundled ABUZ8 Agent Core (8900) live · external brains optional
    ================================================================ */
 
 const AGENTS = {
-  qadir:   { url: 'http://localhost:8900',  label: 'Portable Core',   port: 8900,  wired: true,  color: '#19e0ad' },
+  qadir:   { url: 'http://localhost:8900',  label: 'ABUZ8 OS Agent',  port: 8900,  wired: true,  color: '#2db978' },
   soloman: { url: 'http://localhost:8910',  label: 'Mission Agent',   port: 8910,  wired: false, color: '#d8b65f' },
   hermes:  { url: 'http://localhost:9119',  label: 'Hermes Connector',port: 9119,  wired: false, color: '#a477ff' },
   zait:    { url: 'http://localhost:18789', label: 'OpenClaw Connector', port: 18789, wired: false, color: '#ff746a' }
 };
 
 let currentAgent = 'qadir';
-let currentView = 'hud';
+let currentView = 'chat';
 let sessionId = 'abuz8os-' + Date.now();
 let streaming = false;
 let toolCalls = [];
@@ -2201,8 +2252,9 @@ applyUiZoom();
 /* ── CLOCK ───────────────────────────────────────────────────────── */
 function tick(){
   const d = new Date();
+  const zone = Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(d).find(p => p.type === 'timeZoneName')?.value || '';
   document.getElementById('clock-time').textContent = d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-  document.getElementById('clock-date').textContent = d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) + ' EDT';
+  document.getElementById('clock-date').textContent = d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) + (zone ? ' ' + zone : '');
 }
 tick(); setInterval(tick, 1000);
 
@@ -2496,8 +2548,9 @@ function setView(view, btn){
 /* ── AGENT SWITCH ────────────────────────────────────────────────── */
 function setAgent(ev, id, label, port){
   currentAgent = id;
-  document.getElementById('agent-label').textContent = '✧ ' + label;
-  document.getElementById('agent-port-label').textContent = ':' + port + (AGENTS[id].wired ? ' · live' : ' · stub');
+  const display = id === 'qadir' ? 'ABUZ8 OS Agent' : label;
+  document.getElementById('agent-label').textContent = display;
+  document.getElementById('agent-port-label').textContent = ':' + port + (AGENTS[id].wired ? ' · local mind + tools' : ' · optional connector');
   document.getElementById('agent-sel').value = id;
   document.querySelectorAll('.agent-row').forEach(r => r.classList.remove('active'));
   if (ev) ev.currentTarget.classList.add('active');
@@ -2520,7 +2573,7 @@ function setChatMode(mode, btn){
   const inp = document.getElementById('input');
   if (mode === 'goal') inp.placeholder = '/goal Set a long-horizon goal… Hermes will execute autonomously';
   else if (mode === 'kanban') inp.placeholder = 'Kanban: describe a task to add…';
-  else inp.placeholder = 'Message… (/ for skills, @brain, #memory)';
+  else inp.placeholder = 'Ask the agent anything. It can use memory, tools, and web search when needed.';
 }
 
 /* ── SESSION ─────────────────────────────────────────────────────── */
@@ -2983,12 +3036,13 @@ function appendMsgBrain(brainKey, ag){
   const t = document.getElementById('thread');
   const wrap = document.createElement('div');
   wrap.className = 'msg ai';
-  const initial = ag.label[0];
+  const visibleLabel = brainKey === 'qadir' ? 'ABUZ8 OS Agent' : ag.label;
+  const initial = brainKey === 'qadir' ? 'A' : ag.label[0];
   const tg = CONN[brainKey]?.tg_token && CONN[brainKey]?.tg_chat ? ' <span title="Telegram mirror active" style="color:#19e0ad;font-size:11px">📡</span>' : '';
   wrap.innerHTML = `
     <div class="m-av" style="background:${ag.color || 'var(--card)'};border-color:${ag.color || 'var(--border)'};color:#03090d;font-weight:700">${initial}</div>
     <div>
-      <div style="font:700 10px var(--mono);color:${ag.color || 'var(--gold)'};letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px">${ag.label} :${ag.port}${tg}</div>
+      <div style="font:700 10px var(--mono);color:${ag.color || 'var(--gold)'};letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px">${visibleLabel} :${ag.port}${tg}</div>
       <div class="m-body"><span class="cursor"></span></div>
     </div>
   `;
@@ -4881,60 +4935,18 @@ async function buildBrainData(){
   }
   if (!memories.length){
     const samples = [
-      { c:'This computer has its own local ABUZ8 memory store.',                  cat:'memory',   tier:'L3', region:'memory'    },
-      { c:'The bundled 2.6B brain runs locally with CPU-only fallback.',           cat:'brain',    tier:'L3', region:'executive' },
-      { c:'Model downloads are stored under this user profile only.',             cat:'models',   tier:'L3', region:'memory'    },
-      { c:'Cloud brains require user-owned credentials or subscription access.',  cat:'connector',tier:'L3', region:'executive' },
-      { c:'Mission board tasks are created fresh for this workspace.',            cat:'mission',  tier:'L3', region:'limbic'    },
-      { c:'Action tools require session-only Allow actions consent.',             cat:'safety',   tier:'L3', region:'executive' },
-      { c:'Salience S = R×R×E×U×C×R decides retrieval',                          cat:'doctrine', tier:'L3', region:'memory'    },
-      { c:'Bismillah — every session honors the mission',                         cat:'identity', tier:'L3', region:'limbic'    },
-      { c:'14 systems wired end-to-end · verify.html harness passing',           cat:'session',  tier:'L1', region:'memory'    },
-      { c:'4 Telegram bots active — @QadirCoreM1_bot @Abuz8two_bot @Abuza8oc_bot', cat:'product',  tier:'L3', region:'language'  },
-      { c:'66 persona YAMLs · skills engine alive',                              cat:'product',  tier:'L3', region:'executive' },
-      { c:'Avatar clone studio · voice + 5 photos → Geneface train',              cat:'product',  tier:'L3', region:'visual'    },
-      { c:'Pandora · Avatar Edition cinematic skin shipped',                     cat:'session',  tier:'L1', region:'visual'    },
-      { c:'Mission Control v3 sidebar OS — daily-driver layout',                 cat:'design',   tier:'L3', region:'visual'    },
-      { c:'Qadir Memory uses sqlite-vec + FTS5 dual indexing',                   cat:'doctrine', tier:'L3', region:'memory'    },
-      { c:'Hermes Bayesian neural router — open-source',                         cat:'product',  tier:'L3', region:'thalamus'  },
-      { c:'Octave invariance: f2 = 2 × f1 for harmonic memory binding',          cat:'doctrine', tier:'L3', region:'harmonic'  },
-      { c:'528Hz frequency · Solfeggio · resonance-keyed retrieval',              cat:'doctrine', tier:'L3', region:'harmonic'  },
-      { c:'Major-third 5:4 chord = bright emotion tag',                          cat:'doctrine', tier:'L3', region:'harmonic'  },
-      { c:'Minor-third 6:5 = darker consonance · mood map',                      cat:'doctrine', tier:'L3', region:'harmonic'  },
-      { c:'Tree of Souls: Pandora memory network root → tendrils',                cat:'design',   tier:'L2', region:'limbic'    },
-      { c:'Mission Control = sidebar OS · Qadir HUD = widget shell',              cat:'design',   tier:'L3', region:'visual'    },
-      { c:'Skills marketplace · 70% rev to author · 30% to ABUZ8',                cat:'revenue',  tier:'R1', region:'executive' },
-      { c:'Org switcher: Personal · ABUZ8 LLC · Goldman demo · Pfizer demo',     cat:'product',  tier:'L3', region:'executive' },
-      { c:'PWA installable from os.abuz8ai.com · manifest + sw.js',               cat:'product',  tier:'L3', region:'executive' },
-      { c:'Telegram mirror posts to bot per-brain · real-time',                  cat:'product',  tier:'L1', region:'language'  },
-      { c:'Live brain count: 4 wired · Qadir Soloman Hermes Zait',                cat:'product',  tier:'L1', region:'thalamus'  },
-      { c:'verify.html: 15/15 end-to-end checks',                                 cat:'session',  tier:'L1', region:'memory'    },
-      { c:'Sovereign Mach 3 doctrine: Perceive → Act → Verify → Reflect',         cat:'doctrine', tier:'L3', region:'executive' },
-      { c:'GPU memory: KV-offload = 27× slowdown, never offload',                 cat:'hardware', tier:'L3', region:'spinal'    },
-      { c:'Tensor parallelism on PCIe = 10× SLOWER not faster',                   cat:'hardware', tier:'L3', region:'spinal'    },
-      { c:'Always kill llama-server by process not port (zombies)',               cat:'doctrine', tier:'L3', region:'spinal'    },
-      { c:'Cloudflare DNS · R2 · D1 · Workers wired in CONN',                     cat:'product',  tier:'L3', region:'spinal'    },
-      { c:'66 personas in souls/yaml · GQ council deliberation',                  cat:'product',  tier:'L3', region:'thalamus'  },
-      { c:'Daily reflection writes to SESSION_LOG.md append-only',                cat:'doctrine', tier:'L3', region:'memory'    },
-      { c:'Closeout 5-block protocol: feedback · top 3 · 7 steps · learn',       cat:'doctrine', tier:'L3', region:'executive' },
-      { c:'Truth tags: LIVE · EARLY · ROADMAP — no fake claims',                 cat:'doctrine', tier:'L3', region:'limbic'    },
-      { c:'Lipsync via ComfyUI on Qadir 8900 /api/avatar/speak',                  cat:'product',  tier:'L3', region:'visual'    },
-      { c:'Brain audit chain SOC2 export downloadable from /audit',               cat:'product',  tier:'L1', region:'executive' },
-      { c:'Voice clone wizard 4-step: voice · photos · identity · train',         cat:'product',  tier:'L1', region:'harmonic'  },
-      { c:'Web Audio FFT analyzer · pitch · BPM · chroma · key live',             cat:'product',  tier:'L1', region:'harmonic'  },
-      { c:'Conway Twitty / John Williams patterns for theme music?',               cat:'reading',  tier:'L4', region:'harmonic'  },
-      { c:'Iron Man Jarvis benchmark for HUD aesthetic',                          cat:'design',   tier:'L4', region:'visual'    },
-      { c:'How to Train Your Dragon = dragon flight camera',                     cat:'design',   tier:'L1', region:'visual'    },
-      { c:'Veo3 = cinematic motion-rich quality target',                          cat:'design',   tier:'L1', region:'visual'    },
-      { c:'James Cameron Avatar = bioluminescent Pandora benchmark',              cat:'design',   tier:'L1', region:'visual'    },
-      { c:'Mind map ⨯ Vector RAG ⨯ Force graph = this view',                    cat:'design',   tier:'L1', region:'memory'    },
-      { c:'Bishay sat on a clock and got tired of time',                          cat:'reading',  tier:'L4', region:'limbic'    },
-      { c:'Stripe webhook charge.succeeded routes to R1 ledger',                  cat:'product',  tier:'L3', region:'executive' },
-      { c:'Google Calendar + Gmail OAuth in CONN registry',                       cat:'product',  tier:'L3', region:'language'  },
-      { c:'CRM contacts + deals + activities · live billing-linkable',            cat:'product',  tier:'L3', region:'executive' },
-      { c:'Telegram bot tokens rotated 2026-05-20 after 6.5hr exposure',         cat:'doctrine', tier:'L3', region:'language'  },
-      { c:'Apple Watch HRV ingestion → limbic emotion tagging',                  cat:'product',  tier:'L4', region:'limbic'    },
-      { c:'Constitution: NZT-8200 frequency · Universal Polymath',                cat:'identity', tier:'L3', region:'limbic'    }
+      { c:'This device owns a fresh local memory store.', cat:'memory', tier:'L3', region:'memory' },
+      { c:'The embedded 2.6B reasoning engine runs locally when the bundled runtime is present.', cat:'brain', tier:'L3', region:'executive' },
+      { c:'Downloaded models and connector settings stay on this device only.', cat:'models', tier:'L3', region:'memory' },
+      { c:'Cloud and account connectors require user-owned credentials or subscriptions.', cat:'connector', tier:'L3', region:'executive' },
+      { c:'Desktop actions require session-only Allow Actions consent.', cat:'safety', tier:'L3', region:'executive' },
+      { c:'The local mind has four layers: memory, tasks, personality, and project missions.', cat:'doctrine', tier:'L3', region:'memory' },
+      { c:'MCP connectors can be imported from Claude Desktop or Docker Desktop when those apps are installed.', cat:'connector', tier:'L3', region:'spinal' },
+      { c:'The mission board starts fresh and saves tasks inside the local data folder.', cat:'mission', tier:'L3', region:'limbic' },
+      { c:'The agent should perceive, act with permission, verify, and reflect into memory.', cat:'doctrine', tier:'L3', region:'executive' },
+      { c:'The UI starts in simple chat mode; advanced views are available when needed.', cat:'design', tier:'L3', region:'visual' },
+      { c:'Web search can be used for current information when the device has internet access.', cat:'tool', tier:'L3', region:'language' },
+      { c:'Portable mode stores runtime data beside the portable EXE when the drive is writable.', cat:'storage', tier:'L3', region:'memory' }
     ];
     memories = samples.map((s, i) => ({
       id: 'mem_' + i,
@@ -6289,10 +6301,10 @@ async function cwGenerateScript(){
 
 function sampleScript(format, tone, theme){
   const scripts = {
-    'founder-abuz8-os': `Six months ago I had a server humming in my condo and an empty sqlite file.\n\nThis week I shipped ABUZ8 OS — 90 nodes of a living memory cortex, 4 brains routing in parallel, real-time Telegram mirror across all of them.\n\nThe lesson? Don't build the demo. Build the canonical home. The thing the demo screenshots.\n\nFull build at abuz8ai.com — sovereign AI, ships on your hardware.`,
-    'founder-founder': `Three things nobody tells you about shipping AI software in 2026.\n\nOne: The model isn't the moat. The audit chain is. SOC2 sells, magic doesn't.\n\nTwo: Multi-brain routing beats one giant model. Your users want choice.\n\nThree: Build the canonical home, not the demo. Ship the OS, not the screenshot.\n\nPortable. Sovereign. @abuz8.`,
-    'tutorial-agentic-ai': `Want to build an agentic AI system that actually works?\n\nStep one: PERCEIVE before ACT. Always read state first.\nStep two: GATE every action. No silent failures.\nStep three: VERIFY with output. No 'should work.'\nStep four: REFLECT into memory. Compound learning.\n\nThis loop runs every input in ABUZ8 OS. Free spec at abuz8ai.com.`,
-    'faith-mission': `Bismillah.\n\nThe goal isn't the trillion dollars. The goal is what the trillion builds — mosques across the Sahara, water pipelines through the dry north, schools where there were none.\n\nThe code is the prayer. The shipping is the sadaqa.\n\nKeep building. The Most Generous keeps account.`
+    'founder-abuz8-os': `A useful desktop agent should do four things clearly.\n\nIt should understand the current device, ask before controlling the desktop, remember only what belongs on this machine, and show the user what actually happened.\n\nThat is the standard: local first, permissioned tools, verified results, and clean onboarding.`,
+    'founder-founder': `Three things matter when shipping AI software in 2026.\n\nOne: the agent needs visible controls.\n\nTwo: tool use must be permissioned and verifiable.\n\nThree: the user should always know what is local, what is connected, and what still needs sign-in.\n\nBuild the product around trust.`,
+    'tutorial-agentic-ai': `A practical agent loop is simple.\n\nPerceive the current state.\nAsk permission before real-world actions.\nAct with the right tool.\nVerify the result.\nReflect useful facts into local memory.\n\nThat loop keeps the system understandable.`,
+    'faith-mission': `Start with the user in front of the screen.\n\nMake the interface calm.\nMake the controls obvious.\nMake the data local unless the user connects an account.\nMake every action easy to verify.\n\nThat is how the product earns trust.`
   };
   return scripts[`${format}-${theme}`] || scripts[`founder-${theme}`] || scripts['founder-founder'];
 }
@@ -6676,6 +6688,7 @@ function routeHash(){
   const h = (location.hash || '').replace('#', '');
   const valid = ['hud','chat','work','ref','neoc','skills','audit','usage','create','migrate'];
   if (valid.includes(h)) setView(h);
+  else setView('chat');
 }
 window.addEventListener('hashchange', routeHash);
 
@@ -6820,30 +6833,38 @@ async function chimeraDeliberate(){
 }
 
 /* ── BOOT ────────────────────────────────────────────────────────── */
+const SIMPLE_MODE = document.body.classList.contains('simple-mode');
 renderKingdom();
-renderPortfolio();
-loadMissionBoard();
 loadToolPanel();
 loadBrainSelector();
-renderRef('all');
-renderSkills();
-seedAudit();
-renderUsage();
-renderTraces();
-renderNeocortex();
-setupChromaBins();
+if (!SIMPLE_MODE) {
+  renderPortfolio();
+  loadMissionBoard();
+  renderRef('all');
+  renderSkills();
+  seedAudit();
+  renderUsage();
+  renderTraces();
+  renderNeocortex();
+  setupChromaBins();
+}
 routeHash();
 checkHealth();
-sweepAllPorts();
-loadHardware();
-loadTelephony();
-loadChimeraPanels();
+if (!SIMPLE_MODE) {
+  sweepAllPorts();
+  loadHardware();
+  loadTelephony();
+  loadChimeraPanels();
+}
 setTimeout(detectBrain, 2000);
 setInterval(checkHealth, 15000);
-setInterval(sweepAllPorts, 15000);
-setInterval(renderTraces, 20000);
+if (!SIMPLE_MODE) {
+  setInterval(sweepAllPorts, 15000);
+  setInterval(renderTraces, 20000);
+}
 onbStart(false);
-toast('ABUZ8 OS · Bismillah · 14 systems wired');
+toast('ABUZ8 OS Agent online');
 </script>
 </body>
 </html>
+
