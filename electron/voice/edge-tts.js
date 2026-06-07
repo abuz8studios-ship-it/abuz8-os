@@ -13,10 +13,13 @@ let voicesCacheTime = 0;
 function findPython() {
   if (pythonPath) return pythonPath;
   const candidates = [
+    'C:\\Program Files\\Python311\\python.exe',
+    'C:\\Program Files\\Python312\\python.exe',
+    'C:\\Program Files\\Python310\\python.exe',
+    path.join(__dirname, '..', 'voice', 'venv', 'Scripts', 'python.exe'),
     'python',
     'python3',
-    'py',
-    path.join(__dirname, '..', 'voice', 'venv', 'Scripts', 'python.exe')
+    'py'
   ];
   for (const c of candidates) {
     try {
@@ -59,20 +62,42 @@ async function listVoices() {
     proc.stderr.on('data', (d) => { err += d; });
     proc.on('exit', () => {
       const voices = [];
+      // Newer edge-tts emits per voice across multiple lines:
+      //   Name: af-ZA-AdriNeural
+      //   Gender: Female
+      // We collect Name lines and pair with the following Gender if present.
       const lines = out.split(/\r?\n/);
-      for (const line of lines) {
-        // Format: "Name: en-US-AriaNeural  Gender: Female  Categories: ..."
-        const m = line.match(/^Name:\s*([\w-]+)\s+Gender:\s*(\w+)/);
-        if (m) {
-          const name = m[1];
-          const locale = name.split('-').slice(0, 2).join('-');
+      let pendingName = null;
+      for (const raw of lines) {
+        const line = raw.trim();
+        const mName = line.match(/^Name:\s*([A-Za-z]{2}-[A-Za-z]{2,4}(?:-[A-Za-z]+)?[A-Za-z]+(?:Neural|Multilingual)?)\b/);
+        const mGender = line.match(/^Gender:\s*(\w+)/);
+        if (mName) {
+          pendingName = mName[1];
+        } else if (mGender && pendingName) {
+          const name = pendingName;
+          const parts = name.split('-');
+          const locale = parts.length >= 2 ? parts.slice(0, 2).join('-') : name;
+          const shortName = parts.slice(2).join('-').replace(/Neural$/, '');
           voices.push({
             name,
-            short_name: name.split('-').slice(2).join('-').replace(/Neural$/, ''),
+            short_name: shortName || name,
             locale,
-            gender: m[2],
+            gender: mGender[1],
             engine: 'edge-tts'
           });
+          pendingName = null;
+        }
+      }
+      // Fallback: single-line regex if multi-line failed
+      if (voices.length === 0) {
+        const re = /Name:\s*([A-Za-z]{2}-[A-Za-z]{2,4}(?:-[A-Za-z]+)?[A-Za-z]+(?:Neural|Multilingual)?)[\s\S]*?Gender:\s*(\w+)/g;
+        let m;
+        while ((m = re.exec(out)) !== null) {
+          const name = m[1];
+          const parts = name.split('-');
+          const locale = parts.length >= 2 ? parts.slice(0, 2).join('-') : name;
+          voices.push({ name, short_name: name, locale, gender: m[2], engine: 'edge-tts' });
         }
       }
       voicesCache = voices;

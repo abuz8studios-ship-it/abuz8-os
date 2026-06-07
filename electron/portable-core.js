@@ -2312,6 +2312,51 @@ async function route(req, res) {
   // Jarvis voice/vision/skills endpoints
   if (jarvisHandler && pathname.startsWith('/api/jarvis/')) {
     try {
+      // Special raw handlers for audio streaming + uploads
+      if (pathname === '/api/jarvis/speak/audio') {
+        const id = (searchParams.get('id') || '').replace(/[^\w.-]/g, '');
+        const tmpDir = require('os').tmpdir();
+        const file = path.join(tmpDir, id);
+        if (id && id.startsWith('jarvis-tts-') && fs.existsSync(file)) {
+          res.writeHead(200, {
+            'content-type': 'audio/wav',
+            'content-length': fs.statSync(file).size,
+            'cache-control': 'no-store'
+          });
+          return fs.createReadStream(file).pipe(res);
+        }
+        return json(res, 404, { ok: false, error: 'audio not found' });
+      }
+      if (pathname === '/api/jarvis/listen/upload') {
+        const tmpDir = require('os').tmpdir();
+        const file = path.join(tmpDir, `jarvis-upload-${Date.now()}.webm`);
+        const out = fs.createWriteStream(file);
+        req.pipe(out);
+        await new Promise((resolve, reject) => { out.on('finish', resolve); out.on('error', reject); });
+        try {
+          const stt = require('./voice/faster-whisper-stt');
+          await stt.ensureFasterWhisper(logFn);
+          const r = await stt.transcribe(file, { model: 'base' });
+          return json(res, 200, { ok: true, ...r, file });
+        } catch (e) {
+          return json(res, 500, { ok: false, error: e.message });
+        }
+      }
+      if (pathname === '/api/jarvis/see/upload') {
+        const tmpDir = require('os').tmpdir();
+        const file = path.join(tmpDir, `jarvis-uplimg-${Date.now()}.jpg`);
+        const out = fs.createWriteStream(file);
+        req.pipe(out);
+        await new Promise((resolve, reject) => { out.on('finish', resolve); out.on('error', reject); });
+        try {
+          const vision = require('./vision/florence-vision');
+          await vision.ensureFlorence(logFn);
+          const r = await vision.describe(file, { task: '<MORE_DETAILED_CAPTION>' });
+          return json(res, 200, { ok: true, ...r, file });
+        } catch (e) {
+          return json(res, 500, { ok: false, error: e.message });
+        }
+      }
       const body = req.method === 'POST' ? await getBody(req) : null;
       const result = await jarvisHandler.handle(pathname, body, {
         json: (status, data) => json(res, status, data),

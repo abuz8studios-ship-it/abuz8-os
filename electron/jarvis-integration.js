@@ -8,6 +8,21 @@ const stt = require('./voice/faster-whisper-stt');
 const vision = require('./vision/florence-vision');
 const skills = require('./skills/skill-loader');
 
+// Track recent TTS files so we can serve them back over HTTP
+const ttsFiles = new Map();
+function trackTts(file) {
+  const id = path.basename(file);
+  ttsFiles.set(id, { file, ts: Date.now() });
+  // Cleanup files older than 10 min
+  for (const [k, v] of ttsFiles) {
+    if (Date.now() - v.ts > 600000) {
+      try { fs.unlinkSync(v.file); } catch {}
+      ttsFiles.delete(k);
+    }
+  }
+  return id;
+}
+
 function getDataRoot(core) {
   try {
     const cfg = core.getDataRoot ? core.getDataRoot() : null;
@@ -58,10 +73,21 @@ module.exports = {
         try {
           await edgeTts.ensureEdgeTts(log);
           const result = b.play ? await edgeTts.speakAndPlay(text, b) : await edgeTts.speak(text, b);
-          return { ok: true, ...result };
+          const audioId = trackTts(result.file);
+          return { ok: true, ...result, audio_url: `/api/jarvis/speak/audio?id=${encodeURIComponent(audioId)}` };
         } catch (e) {
           return { ok: false, error: e.message };
         }
+      }
+      // /api/jarvis/speak/audio?id=... — serve the WAV back so browsers can play it
+      if (pathname === '/api/jarvis/speak/audio') {
+        // Special raw response — caller must handle via helpers.raw
+        return { ok: true, _raw: 'tts-stream', files: ttsFiles };
+      }
+      // /api/jarvis/listen/upload — accept WAV upload from browser MediaRecorder
+      if (pathname === '/api/jarvis/listen/upload') {
+        // Special raw response — caller will receive raw bytes via helpers.uploadStream
+        return { ok: true, _raw: 'upload-stt' };
       }
       // /api/jarvis/listen — record + transcribe
       if (pathname === '/api/jarvis/listen') {
@@ -94,6 +120,10 @@ module.exports = {
         } catch (e) {
           return { ok: false, error: e.message };
         }
+      }
+      // /api/jarvis/see/upload — accept image upload from browser camera/file
+      if (pathname === '/api/jarvis/see/upload') {
+        return { ok: true, _raw: 'upload-vision' };
       }
       // /api/jarvis/skills — list / create / run
       if (pathname === '/api/jarvis/skills') {
