@@ -361,6 +361,36 @@ body.ui-scaled .os{width:calc(100vw / var(--ui-zoom,1));height:calc(100vh / var(
 .onb-btn:hover{background:rgba(216,182,95,.28);border-color:var(--gold);box-shadow:0 0 18px rgba(216,182,95,.22)}
 .onb-btn.ghost{border-color:var(--border);background:transparent;color:var(--text3)}
 .onb-btn.ghost:hover{color:var(--text);border-color:var(--gold-dim);box-shadow:none}
+.onb-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.onb-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.onb-cardlet{border:1px solid var(--border);background:var(--card);border-radius:12px;padding:12px;min-height:92px;display:flex;flex-direction:column;gap:6px}
+.onb-cardlet b{font-size:13px;color:var(--gold2)}
+.onb-cardlet p{font-size:11.5px;line-height:1.45;color:var(--text3);margin:0}
+.onb-cardlet .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.onb-tag{font:800 8.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--border);border-radius:999px;padding:3px 6px;color:var(--text3);white-space:nowrap}
+.onb-tag.ready,.onb-tag.installed,.onb-tag.recommended{background:var(--green-bg);border-color:var(--emerald);color:var(--emerald2)}
+.onb-tag.optional{background:var(--amber-bg);border-color:var(--gold-dim);color:var(--gold)}
+.onb-link{font:700 10.5px var(--mono);color:var(--emerald2);text-decoration:none;margin-top:auto}
+.onb-link:hover{text-decoration:underline}
+.app-menu{display:flex;gap:4px;align-items:center;grid-column:1/-1;margin-top:3px}
+.app-menu button{border:0;background:transparent;color:var(--text3);font:700 11px var(--font);padding:4px 7px;border-radius:7px;cursor:pointer}
+.app-menu button:hover{background:var(--green-bg);color:var(--emerald2)}
+.start-panel{border:1px solid rgba(45,185,120,.16);background:linear-gradient(180deg,#fff,rgba(245,252,248,.85));border-radius:12px;padding:10px;display:grid;gap:8px}
+.start-title{font:800 12px var(--font);color:var(--emerald2);display:flex;align-items:center;justify-content:space-between}
+.start-sub{font-size:11px;color:var(--text3);line-height:1.45}
+.start-pick{display:grid;gap:5px}
+.start-pick button{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;border:1px solid rgba(45,185,120,.16);background:#fff;border-radius:8px;padding:7px 8px;color:var(--text);font-size:11.5px;cursor:pointer}
+.start-pick button:hover{border-color:var(--emerald);background:var(--green-bg)}
+.setup-mini{display:grid;gap:5px;font:700 10px var(--mono);color:var(--text3)}
+.setup-mini span{display:flex;align-items:center;justify-content:space-between;border:1px solid rgba(45,185,120,.12);border-radius:7px;padding:5px 6px;background:#fff}
+.chat-avatar-live{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center}
+.bot-svg{width:42px;height:42px;filter:drop-shadow(0 5px 14px rgba(45,185,120,.24))}
+.bot-svg .bot-head{animation:avatar-bob 4.8s ease-in-out infinite}
+.bot-svg .bot-eye{animation:bot-blink 5.5s infinite;transform-origin:center}
+.bot-svg .bot-mouth{animation:bot-talk 2.6s ease-in-out infinite;transform-origin:24px 31px}
+.bot-svg .bot-orb{animation:orbit 12s linear infinite;transform-origin:24px 24px}
+@keyframes bot-blink{0%,45%,49%,100%{transform:scaleY(1)}47%{transform:scaleY(.12)}}
+@keyframes bot-talk{0%,100%{transform:scaleY(.72)}50%{transform:scaleY(1.28)}}
 .probe-hero{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:center;background:rgba(255,255,255,.035);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:12px}
 .probe-tier{font:800 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--emerald2)}
 .probe-title{font:800 18px var(--serif);color:var(--gold2);margin-top:2px}
@@ -942,9 +972,10 @@ body.simple-mode .ibar{background:#fff;padding:12px calc(50% - 430px);border-top
 body.simple-mode #input{background:#fff;border-color:rgba(45,185,120,.28);border-radius:18px;color:var(--text);font-size:15px;min-height:48px}
 body.simple-mode #send-btn{background:var(--emerald);border-color:var(--emerald);color:white;width:40px;height:40px}
 body.simple-mode .dock{display:none}
-body.simple-mode .onb-card{background:#fff;color:var(--text);border-color:rgba(45,185,120,.22)}
+body.simple-mode .onb-card{width:min(900px,94vw);background:#fff;color:var(--text);border-color:rgba(45,185,120,.22)}
 body.simple-mode .onb-sub,.simple-mode .ft p{color:var(--text3)}
 body.simple-mode .onb-title{color:var(--emerald2)}
+body.simple-mode .onb-cardlet{background:#f8fcf9;border-color:rgba(45,185,120,.18)}
 body.simple-mode .sidebar{background:#f6fbf7;border-right:1px solid rgba(45,185,120,.12);padding:12px 10px;gap:10px}
 body.simple-mode .side-block{background:transparent;border-color:rgba(45,185,120,.10);box-shadow:none}
 body.simple-mode .new-session-btn{background:#fff;border-color:rgba(45,185,120,.20);color:var(--emerald2)}
@@ -956,12 +987,14 @@ body.simple-mode .voice-btn{background:#f7fbf8;border:1px solid rgba(45,185,120,
 body.simple-mode .voice-btn.on{background:rgba(45,185,120,.14);border-color:rgba(45,185,120,.45)}
 body.simple-mode .live-work-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;font:700 10px var(--mono);color:var(--text3)}
 body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#fff;border-radius:999px;padding:5px 8px;color:var(--emerald2)}
+body.simple-mode .app-menu{display:flex}
 @media(max-width:1180px){
   body.simple-mode .main{grid-template-columns:220px 1fr}
   body.simple-mode .ibar{padding:10px 14px}
   body.simple-mode #thread{padding-left:18px;padding-right:18px}
 }
 @media(max-width:900px){
+  .onb-grid,.onb-grid.three{grid-template-columns:1fr}
   body.simple-mode .topbar{grid-template-columns:1fr;grid-auto-rows:auto;height:auto}
   body.simple-mode .status-row{justify-content:flex-start;flex-wrap:wrap}
   body.simple-mode .main{grid-template-columns:1fr}
@@ -996,50 +1029,38 @@ body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#ff
 <div id="onb-overlay">
   <div class="onb-card">
     <div class="onb-step on" data-step="0">
-      <div class="onb-eyebrow">ABUZ8 OS Consumer Pro · v1.0</div>
-      <div class="onb-title">Welcome. Let’s set up this computer.</div>
-      <div class="onb-sub">This app starts its own local agent core, chat face, memory, mission board, MCP bridge, and bundled offline reasoning engine. It learns this device at first launch; it does not import another machine’s private memory.</div>
-      <div class="onb-feat"><div class="ico">✓</div><div class="ft"><b>Local first</b><p>Runs on this Windows computer with its own port, local data folder, and embedded 2.6B GGUF engine.</p></div></div>
-      <div class="onb-feat"><div class="ico">↗</div><div class="ft"><b>Connectors are doors</b><p>Gmail, Google, Claude, Docker, GitHub, and social tools need your own sign-in, token, or local app running.</p></div></div>
-      <div class="onb-feat"><div class="ico">🔒</div><div class="ft"><b>Device-only data</b><p>Memory, missions, souls, connectors, downloaded models, and settings save on the device running the app.</p></div></div>
+      <div class="onb-eyebrow">Step 1 of 5 · Pick your agent</div>
+      <div class="onb-title">Start simple. Choose who is driving.</div>
+      <div class="onb-sub">ABUZ8 OS is a local desktop agent launcher. Pick a role, then it probes this PC, shows the brains it can use, and tells you exactly what to install if you want more power.</div>
+      <div id="onb-agents" class="onb-grid three"><div style="font-size:12px;color:var(--text3)">Loading agents…</div></div>
     </div>
     <div class="onb-step" data-step="1">
-      <div class="onb-eyebrow">Step 1 · Engine</div>
-      <div class="onb-title">The brain is inside. The agent is the face.</div>
-      <div class="onb-sub">The app answers as ABUZ8 OS Agent. The bundled local model is only one reasoning engine inside the four-layer mind.</div>
+      <div class="onb-eyebrow">Step 2 of 5 · Pick your brains</div>
+      <div class="onb-title">Use the brain inside, add bigger ones when ready.</div>
+      <div class="onb-sub">The app ships with a portable local brain. This screen shows downloaded local brains, what this device can run, and cloud brain doors that need your own key.</div>
       <div id="onb-brains"><div style="font-size:12px;color:var(--text3)">Detecting engines…</div></div>
     </div>
     <div class="onb-step" data-step="2">
-      <div class="onb-eyebrow">Step 2 · Capabilities</div>
-      <div class="onb-title">This machine, specifically</div>
-      <div class="onb-sub">ABUZ8 OS auto-probes the device it is running on, builds a local Mission Control profile, and shows what is live, what is fallback, and what needs a connector.</div>
+      <div class="onb-eyebrow">Step 3 of 5 · Local install check</div>
+      <div class="onb-title">Like LM Studio: what can this PC handle?</div>
+      <div class="onb-sub">ABUZ8 OS probes RAM, CPU, GPU, storage, and installed CLIs. It recommends local runtimes only when this device can use them.</div>
       <div id="onb-device-probe"><div style="font-size:12px;color:var(--text3)">Scanning this device…</div></div>
+      <div id="onb-local-installs" class="onb-grid"><div style="font-size:12px;color:var(--text3)">Loading install options…</div></div>
     </div>
     <div class="onb-step" data-step="3">
-      <div class="onb-eyebrow">Step 3 · Mind Structure</div>
-      <div class="onb-title">Four layers, simple controls</div>
-      <div class="onb-sub">The framework is the mind. You can program it without editing code:</div>
-      <div class="onb-feat"><div class="ico">1</div><div class="ft"><b>Memory</b><p>What the agent should remember on this device.</p></div></div>
-      <div class="onb-feat"><div class="ico">2</div><div class="ft"><b>Tasks</b><p>Work items and follow-ups the agent can organize.</p></div></div>
-      <div class="onb-feat"><div class="ico">3</div><div class="ft"><b>Personality / Soul</b><p>Default, Operator, Researcher, or Builder behavior.</p></div></div>
-      <div class="onb-feat"><div class="ico">4</div><div class="ft"><b>Project Missions</b><p>Longer goals and project boards stored locally.</p></div></div>
+      <div class="onb-eyebrow">Step 4 of 5 · Connect brains and tools</div>
+      <div class="onb-title">OAuth, MCP, CLI, and cloud options.</div>
+      <div class="onb-sub">Nothing connects silently. The app shows the available doors and where to sign in, install, or paste your own key.</div>
+      <div id="onb-connectors" class="onb-grid"><div style="font-size:12px;color:var(--text3)">Loading connectors…</div></div>
     </div>
     <div class="onb-step" data-step="4">
-      <div class="onb-eyebrow">Step 4 · Try it</div>
-      <div class="onb-title">Take it for a spin</div>
-      <div class="onb-sub">Pick one. Desktop and web actions require the session Allow actions switch so the app cannot operate the computer silently.</div>
-      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Open Chrome'))"><span class="tt">DESKTOP</span>Open Chrome</button>
-      <button class="onb-try" onclick="onbTry('Search the web for latest AI agent news')"><span class="tt">WEB</span>Search the web</button>
-      <button class="onb-try" onclick="onbTry('/probe')"><span class="tt">SYSTEM</span>Probe this device</button>
-      <button class="onb-try" onclick="onbTry('Mission Control auto probe this current device')"><span class="tt">MISSION</span>Auto-profile this device</button>
-    </div>
-    <div class="onb-step" data-step="5">
-      <div class="onb-eyebrow">You're set</div>
-      <div class="onb-title">Ready ✦</div>
-      <div class="onb-sub">Type in the command bar or chat. Re-open this guide with the <b>?</b> in the topbar.</div>
-      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>Plain language</b><p>“Open Chrome.” “Search the web.” “Research what this looks like and create it in Paint.” “Probe this device.”</p></div></div>
-      <div class="onb-feat"><div class="ico">👁️</div><div class="ft"><b>Permissioned control</b><p>Desktop actions require Allow Actions each session. Chat and memory work without that switch.</p></div></div>
-      <div class="onb-feat"><div class="ico">⚡</div><div class="ft"><b>Extend it</b><p>Use Migrate to import MCP connectors, add local GGUF brains, or register cloud brains with your own keys.</p></div></div>
+      <div class="onb-eyebrow">Step 5 of 5 · Start and go</div>
+      <div class="onb-title">One prompt. Visible work. Verified result.</div>
+      <div class="onb-sub">Choose a starter mission. Desktop and browser actions need Allow Actions for the current session so the app cannot control the machine silently.</div>
+      <button class="onb-try" onclick="onbTry('Mission Control auto probe this current device')"><span class="tt">PROBE</span>Profile this device and show what is ready</button>
+      <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Open Paint'))"><span class="tt">DESKTOP</span>Open Paint</button>
+      <button class="onb-try" onclick="onbTry('Research what a space rover looks like and create a picture in Paint')"><span class="tt">CREATE</span>Research first, then create in Paint</button>
+      <button class="onb-try" onclick="setView('migrate');onbSkip()"><span class="tt">CONNECT</span>Open MCP / OAuth / CLI connector catalog</button>
     </div>
     <div class="onb-foot">
       <button class="onb-btn ghost" onclick="onbSkip()">Skip</button>
@@ -1060,6 +1081,12 @@ body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#ff
       <div>
         <h1>ABUZ8 OS</h1>
         <p id="brand-sub">Sovereign · Mach 3</p>
+        <div class="app-menu" aria-label="Application menu">
+          <button onclick="newSession()">Edit</button>
+          <button onclick="setView('chat')">View</button>
+          <button onclick="setView('work')">Window</button>
+          <button onclick="onbStart(true)">Help</button>
+        </div>
       </div>
       <div class="org-switcher" onclick="toggleOrgMenu(event)">
         <span class="org-cur" id="org-cur">Personal Workspace</span>
@@ -1117,6 +1144,18 @@ body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#ff
       <div class="side-block">
         <button class="new-session-btn" onclick="newSession()"><span>＋ </span>New Session</button>
         <div id="session-list" style="margin-top:6px;max-height:120px;overflow-y:auto;font-size:11px"></div>
+      </div>
+
+      <div class="start-panel">
+        <div class="start-title">Start Here <button class="qbtn" onclick="onbStart(true)" style="padding:3px 7px;font-size:10px">Guide</button></div>
+        <div class="start-sub" id="start-summary">Probing this PC and loading agent options…</div>
+        <div class="start-pick">
+          <button onclick="setAgentRole('operator')"><span>Operator</span><b>desktop</b></button>
+          <button onclick="setAgentRole('researcher')"><span>Researcher</span><b>web</b></button>
+          <button onclick="setAgentRole('builder')"><span>Builder</span><b>tools</b></button>
+          <button onclick="setView('migrate')"><span>Install / Connect</span><b>MCP</b></button>
+        </div>
+        <div class="setup-mini" id="setup-mini"></div>
       </div>
 
       <div class="side-block">
@@ -1282,8 +1321,31 @@ body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#ff
       <div class="view on" id="view-chat">
         <div class="chat-view">
           <div class="chat-top">
-            <div class="agent-label" id="agent-label">ABUZ8 OS Agent</div>
-            <span class="agent-port-label" id="agent-port-label">:8900 · local mind + tools</span>
+            <div class="chat-avatar-live" title="ABUZ8 OS animated avatar">
+              <svg class="bot-svg" viewBox="0 0 48 48" aria-hidden="true">
+                <defs>
+                  <radialGradient id="botSkin" cx="35%" cy="25%" r="70%">
+                    <stop offset="0%" stop-color="#ffffff"/>
+                    <stop offset="55%" stop-color="#b9f2d0"/>
+                    <stop offset="100%" stop-color="#2db978"/>
+                  </radialGradient>
+                </defs>
+                <g class="bot-orb"><circle cx="24" cy="24" r="19" fill="none" stroke="#2db978" stroke-width="1.2" stroke-dasharray="3 5"/></g>
+                <g class="bot-head">
+                  <path d="M15 20 Q24 8 33 20 Q37 25 34 34 Q29 41 20 39 Q12 36 11 28 Q11 23 15 20Z" fill="url(#botSkin)" stroke="#16875a" stroke-width="1.2"/>
+                  <path d="M17 19 L13 10 M31 19 L35 10" stroke="#16875a" stroke-width="2" stroke-linecap="round"/>
+                  <circle class="bot-eye" cx="19" cy="25" r="2.3" fill="#0f6b48"/>
+                  <circle class="bot-eye" cx="29" cy="25" r="2.3" fill="#0f6b48"/>
+                  <path class="bot-mouth" d="M19 31 Q24 34 29 31" stroke="#0f6b48" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+                  <circle cx="17" cy="18" r="1.5" fill="#f0c96a"/>
+                  <circle cx="31" cy="18" r="1.5" fill="#f0c96a"/>
+                </g>
+              </svg>
+            </div>
+            <div>
+              <div class="agent-label" id="agent-label">ABUZ8 OS Agent</div>
+              <span class="agent-port-label" id="agent-port-label">:8900 · local mind + tools</span>
+            </div>
             <select id="brain-tier-sel" onchange="selectEmbeddedBrainUI(this.value)" title="Active embedded brain" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:5px 8px;font:10px var(--mono);max-width:170px">
               <option value="auto">Brain: auto</option>
             </select>
@@ -3387,15 +3449,16 @@ function refFilter(kind, btn){
 
 /* ── ONBOARDING ──────────────────────────────────────────────────── */
 let onbStep = 0;
-const onbTotal = 6;
+const onbTotal = 5;
+let setupOptionsCache = null;
+let selectedAgentRole = localStorage.getItem('abuz8_agent_role') || 'operator';
 
 function onbStart(force){
   if (!force && (localStorage.getItem('abuz8os_onb_done') || localStorage.getItem('abuz8_onb'))) return;
   document.getElementById('onb-overlay').classList.add('show');
   renderOnbDots();
   if (force) onbGo(-onbStep); // reset to 0
-  onbDetectBrains();
-  onbLoadDeviceProbe();
+  loadSetupOptions();
 }
 
 function onbSkip(){
@@ -3423,6 +3486,98 @@ function renderOnbDots(){
   let html = '';
   for (let i = 0; i < onbTotal; i++) html += `<div class="onb-dot ${i === onbStep ? 'on' : ''}"></div>`;
   document.getElementById('onb-dots').innerHTML = html;
+}
+
+async function loadSetupOptions(force){
+  if (setupOptionsCache && !force) {
+    renderSetupOptions(setupOptionsCache);
+    return setupOptionsCache;
+  }
+  try {
+    const r = await fetch('http://localhost:8900/api/setup/options', { signal: AbortSignal.timeout(10000) });
+    setupOptionsCache = await r.json();
+  } catch (e) {
+    setupOptionsCache = { ok:false, error:e.message, agents:[], localRuntimes:[], cliTools:[], oauthBrains:[], cloudBrains:[] };
+  }
+  renderSetupOptions(setupOptionsCache);
+  return setupOptionsCache;
+}
+
+function setAgentRole(role){
+  selectedAgentRole = role || 'operator';
+  localStorage.setItem('abuz8_agent_role', selectedAgentRole);
+  const names = { operator:'Operator', researcher:'Researcher', builder:'Builder', creator:'Creator' };
+  const label = names[selectedAgentRole] || selectedAgentRole;
+  const sub = document.getElementById('agent-port-label');
+  if (sub) sub.textContent = label + ' role · local mind + tools';
+  renderSetupOptions(setupOptionsCache);
+  toast('Agent role: ' + label);
+}
+
+function installCard(item){
+  const tag = item.status || (item.installed ? 'installed' : 'optional');
+  const link = item.url ? `<a class="onb-link" href="${escapeHtml(item.url)}" target="_blank">Open official link</a>` : '';
+  const cmd = item.winget || item.cli || item.install || item.key_env || item.auth || '';
+  return `<div class="onb-cardlet">
+    <div class="row"><b>${escapeHtml(item.name)}</b><span class="onb-tag ${escapeHtml(tag)}">${escapeHtml(tag)}</span></div>
+    <p>${escapeHtml(item.purpose || item.detail || '')}</p>
+    ${cmd ? `<p><code>${escapeHtml(cmd)}</code></p>` : ''}
+    ${link}
+  </div>`;
+}
+
+function renderSetupOptions(data){
+  const agentsEl = document.getElementById('onb-agents');
+  if (agentsEl) {
+    const agents = data?.agents?.length ? data.agents : [
+      { id:'operator', name:'Operator', detail:'Desktop control and verification.' },
+      { id:'researcher', name:'Researcher', detail:'Search, source, summarize, create.' },
+      { id:'builder', name:'Builder', detail:'Tools, skills, connectors, code.' },
+      { id:'creator', name:'Creator', detail:'Images, video, voice, social.' }
+    ];
+    agentsEl.innerHTML = agents.map(a => `<button class="onb-cardlet" onclick="setAgentRole('${escapeHtml(a.id)}')" style="text-align:left;cursor:pointer;border-color:${a.id===selectedAgentRole?'var(--emerald)':'var(--border)'}">
+      <div class="row"><b>${escapeHtml(a.name)}</b><span class="onb-tag ${a.id===selectedAgentRole?'ready':'optional'}">${a.id===selectedAgentRole?'picked':'pick'}</span></div>
+      <p>${escapeHtml(a.detail || '')}</p>
+    </button>`).join('');
+  }
+  const brainTarget = document.getElementById('onb-brains');
+  if (brainTarget && data?.probe) {
+    const embedded = data.probe.embedded_brain || {};
+    const tiers = embedded.available || data.probe.brain_tiers || [];
+    const plan = data.localModelPlan || {};
+    brainTarget.innerHTML = `<div class="onb-grid">
+      <div class="onb-cardlet"><div class="row"><b>Bundled brain</b><span class="onb-tag ready">ready</span></div><p>${escapeHtml(embedded.name || 'Portable Core')} · ${escapeHtml(embedded.tier || 'local')}</p></div>
+      <div class="onb-cardlet"><div class="row"><b>${escapeHtml(plan.label || 'Device plan')}</b><span class="onb-tag recommended">auto</span></div><p>${escapeHtml(plan.detail || 'This device was probed for local/cloud brain use.')}</p></div>
+      ${tiers.slice(0,4).map(t => `<div class="onb-cardlet"><div class="row"><b>${escapeHtml(t.name || t.id)}</b><span class="onb-tag ${t.embedded?'ready':'optional'}">${t.embedded?'ready':'missing'}</span></div><p>${escapeHtml(t.role || t.model_file || '')}</p></div>`).join('')}
+    </div>`;
+  } else if (brainTarget && data?.error) {
+    brainTarget.innerHTML = '<div style="font-size:12px;color:var(--text3)">Setup service still starting. Try Help again in a moment.</div>';
+  }
+  const deviceTarget = document.getElementById('onb-device-probe');
+  if (deviceTarget && data?.probe) {
+    const p = data.probe;
+    deviceTarget.innerHTML = `<div class="onb-cardlet">
+      <div class="row"><b>${escapeHtml(p.headline || 'Device probed')}</b><span class="onb-tag ready">${escapeHtml(p.tier || 'ready')}</span></div>
+      <p>${escapeHtml(p.cpu?.name || 'CPU')} · ${escapeHtml(String(p.memory?.total_gb || '?'))} GB RAM · ${escapeHtml((p.gpus || []).map(g => g.name).join(', ') || 'no discrete GPU detected')}</p>
+      <p>Data root: <code>${escapeHtml(p.storage?.data_root || '')}</code></p>
+    </div>`;
+  }
+  const localEl = document.getElementById('onb-local-installs');
+  if (localEl) localEl.innerHTML = (data?.localRuntimes || []).map(installCard).join('') || '<div style="font-size:12px;color:var(--text3)">No local install options loaded.</div>';
+  const connEl = document.getElementById('onb-connectors');
+  if (connEl) {
+    const rows = [...(data?.cliTools || []).slice(0,6), ...(data?.oauthBrains || []).slice(0,6), ...(data?.cloudBrains || []).slice(0,6)];
+    connEl.innerHTML = rows.map(it => installCard({ ...it, status: it.installed ? 'installed' : (it.auth ? 'oauth' : 'optional') })).join('');
+  }
+  const startSummary = document.getElementById('start-summary');
+  if (startSummary && data?.probe) startSummary.textContent = `${data.probe.tier || 'device'} · ${data.localModelPlan?.label || 'setup ready'} · role: ${selectedAgentRole}`;
+  const mini = document.getElementById('setup-mini');
+  if (mini && data?.checks) {
+    const c = data.checks;
+    mini.innerHTML = [
+      ['LM Studio', c.lmstudio], ['Ollama', c.ollama], ['Docker MCP', c.docker_mcp], ['GitHub CLI', c.gh]
+    ].map(([k,v]) => `<span>${k}<b style="color:${v?'var(--emerald2)':'var(--gold)'}">${v?'ready':'install'}</b></span>`).join('');
+  }
 }
 
 async function onbDetectBrains(){
@@ -6927,6 +7082,8 @@ const SIMPLE_MODE = document.body.classList.contains('simple-mode');
 renderKingdom();
 loadToolPanel();
 loadBrainSelector();
+loadSetupOptions();
+{ const sub = document.getElementById('agent-port-label'); if (sub) sub.textContent = selectedAgentRole + ' role · local mind + tools'; }
 if (!SIMPLE_MODE) {
   renderPortfolio();
   loadMissionBoard();

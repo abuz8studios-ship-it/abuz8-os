@@ -1896,6 +1896,69 @@ async function machineProbe() {
   };
 }
 
+async function setupOptions() {
+  const probe = await machineProbe();
+  const checks = {
+    winget: await commandExists('winget', ['--version']),
+    git: await commandExists('git', ['--version']),
+    gh: await commandExists('gh', ['--version']),
+    node: await commandExists('node', ['--version']),
+    python: await commandExists('python', ['--version']),
+    uv: await commandExists('uv', ['--version']),
+    docker: probe.connectors.docker,
+    docker_mcp: probe.connectors.docker_mcp,
+    ollama: probe.connectors.ollama,
+    lmstudio: await commandExists('lms', ['--version']),
+    cloudflared: await commandExists('cloudflared', ['--version'])
+  };
+  const ram = probe.memory?.total_gb || 0;
+  const gpuNames = (probe.gpus || []).map((g) => g.name).join(' ');
+  const hasNvidia = /nvidia|rtx|gtx/i.test(gpuNames);
+  const canLocal = ram >= 16;
+  const localModelPlan = ram >= 32 && hasNvidia
+    ? { label: 'Local powerhouse', detail: 'Use LM Studio/Ollama with 7B-14B GGUF models; connect ComfyUI for avatar/video rendering.' }
+    : ram >= 16
+      ? { label: 'Local capable', detail: 'Use LM Studio/Ollama with small 3B-8B quantized GGUF models; keep video/avatar rendering optional.' }
+      : { label: 'Cloud recommended', detail: 'Use the bundled 2.6B helper for routing and connect cloud brains for heavier work.' };
+  const localRuntimes = [
+    { id: 'lm-studio', name: 'LM Studio', status: checks.lmstudio ? 'installed' : (canLocal ? 'recommended' : 'optional'), purpose: 'Friendly local model app with hardware-aware model downloads.', url: 'https://lmstudio.ai/download?os=windows', install: 'Download LM Studio for Windows', cli: 'lms server start' },
+    { id: 'ollama', name: 'Ollama', status: checks.ollama ? 'installed' : (canLocal ? 'recommended' : 'optional'), purpose: 'Simple local model runner and model library.', url: 'https://ollama.com/download', install: 'Download Ollama for Windows', cli: 'ollama run llama3.2:3b' },
+    { id: 'comfyui', name: 'ComfyUI', status: hasNvidia ? 'recommended' : 'optional', purpose: 'Local image/video/avatar workflow engine.', url: 'https://github.com/comfyanonymous/ComfyUI', install: 'Install ComfyUI when you want local image/video rendering.', cli: 'python main.py --listen 127.0.0.1 --port 8188' },
+    { id: 'docker-desktop', name: 'Docker Desktop', status: checks.docker ? (checks.docker_mcp ? 'mcp-ready' : 'installed') : 'optional', purpose: 'Containers plus Docker MCP Toolkit when available.', url: 'https://docs.docker.com/desktop/setup/install/windows-install/', install: 'Install Docker Desktop for Windows', cli: 'docker mcp gateway run --block-secrets --transport stdio' }
+  ];
+  const cliTools = [
+    { id: 'git', name: 'Git', installed: checks.git, url: 'https://git-scm.com/download/win', winget: 'winget install --id Git.Git -e', purpose: 'Repositories and source control.' },
+    { id: 'gh', name: 'GitHub CLI', installed: checks.gh, url: 'https://cli.github.com/', winget: 'winget install --id GitHub.cli -e', purpose: 'GitHub auth, repos, PRs, issues, and actions.' },
+    { id: 'node', name: 'Node.js', installed: checks.node, url: 'https://nodejs.org/en/download', winget: 'winget install --id OpenJS.NodeJS.LTS -e', purpose: 'MCP servers, web tooling, npm/npx connectors.' },
+    { id: 'python', name: 'Python', installed: checks.python, url: 'https://www.python.org/downloads/windows/', winget: 'winget install --id Python.Python.3.13 -e', purpose: 'Automation scripts, STT/TTS helpers, local tools.' },
+    { id: 'uv', name: 'uv', installed: checks.uv, url: 'https://docs.astral.sh/uv/getting-started/installation/', winget: 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"', purpose: 'Fast Python package/tool runner for MCP servers.' },
+    { id: 'cloudflared', name: 'Cloudflared', installed: checks.cloudflared, url: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/', winget: 'winget install --id Cloudflare.cloudflared -e', purpose: 'Expose a local brain/API safely through your own Cloudflare tunnel.' }
+  ];
+  const oauthBrains = [
+    { id: 'google', name: 'Google OAuth', purpose: 'Gmail, Drive, Calendar, Docs, Sheets, Slides.', url: 'https://console.cloud.google.com/apis/credentials', auth: 'OAuth client ID' },
+    { id: 'github', name: 'GitHub OAuth/PAT', purpose: 'Repos, issues, PRs, Actions, projects.', url: 'https://github.com/settings/tokens', auth: 'PAT or OAuth app' },
+    { id: 'microsoft', name: 'Microsoft OAuth', purpose: 'Outlook, Teams, SharePoint, Azure.', url: 'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade', auth: 'Azure app registration' },
+    { id: 'slack', name: 'Slack OAuth', purpose: 'Workspace channels, DMs, files, commands.', url: 'https://api.slack.com/apps', auth: 'Slack app OAuth' },
+    { id: 'claude-desktop', name: 'Claude Desktop MCP', purpose: 'Import Claude Desktop MCP config into ABUZ8.', url: 'https://claude.ai/download', auth: 'Claude Desktop local config' },
+    { id: 'docker-mcp', name: 'Docker Desktop MCP', purpose: 'Import Docker MCP gateway when Docker Desktop supports it.', url: 'https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', auth: 'Docker Desktop local gateway' }
+  ];
+  const cloudBrains = [
+    { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys', key_env: 'OPENAI_API_KEY', purpose: 'General reasoning, vision, audio, image generation.' },
+    { id: 'anthropic', name: 'Anthropic', url: 'https://console.anthropic.com/settings/keys', key_env: 'ANTHROPIC_API_KEY', purpose: 'Claude cloud reasoning and coding.' },
+    { id: 'google-ai', name: 'Google AI Studio', url: 'https://aistudio.google.com/app/apikey', key_env: 'GOOGLE_API_KEY', purpose: 'Gemini cloud reasoning and multimodal work.' },
+    { id: 'azure-foundry', name: 'Azure AI Foundry', url: 'https://ai.azure.com/', key_env: 'AZURE_OPENAI_API_KEY', purpose: 'Enterprise OpenAI deployments, agents, evals.' },
+    { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/keys', key_env: 'OPENROUTER_API_KEY', purpose: 'One key for many hosted models.' },
+    { id: 'hyperbrowser', name: 'Hyperbrowser', url: 'https://app.hyperbrowser.ai/dashboard/api-keys', key_env: 'HYPERBROWSER_API_KEY', purpose: 'Hosted visible browser automation.' }
+  ];
+  const agents = [
+    { id: 'operator', name: 'Operator', detail: 'Desktop actions, file work, app launching, verification.', recommended: true },
+    { id: 'researcher', name: 'Researcher', detail: 'Searches web, opens sources, summarizes, then creates from evidence.' },
+    { id: 'builder', name: 'Builder', detail: 'Creates tools, skills, connectors, and app changes.' },
+    { id: 'creator', name: 'Creator', detail: 'Image/video/social workflows with local or cloud rendering.' }
+  ];
+  return { ok: true, probe, checks, localModelPlan, agents, localRuntimes, cliTools, oauthBrains, cloudBrains, official_links_note: 'Links point to vendor documentation/download pages so the target PC receives current installers.' };
+}
+
 async function autoProbeDevice() {
   const probe = await machineProbe();
   const profile = {
@@ -2028,6 +2091,9 @@ async function route(req, res) {
   }
   if (pathname === '/api/device/probe' || pathname === '/api/capabilities/probe') {
     return json(res, 200, await machineProbe());
+  }
+  if (pathname === '/api/setup/options' || pathname === '/api/onboarding/setup') {
+    return json(res, 200, await setupOptions());
   }
   if (pathname === '/api/device/auto-probe' || pathname === '/api/mission/auto-probe') {
     return json(res, 200, await autoProbeDevice());
