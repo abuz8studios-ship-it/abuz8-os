@@ -9,6 +9,8 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
+const jarvis = require('./jarvis-integration');
+let jarvisHandler = null;
 
 const PORT = Number(process.env.QADIR_PORT || process.env.ABUZ8_PORT || 8900);
 const LFM_PORT = Number(process.env.ABUZ8_LFM_PORT || 8902);
@@ -2307,6 +2309,20 @@ async function route(req, res) {
       return json(res, 500, { ok: false, error: e.message });
     }
   }
+  // Jarvis voice/vision/skills endpoints
+  if (jarvisHandler && pathname.startsWith('/api/jarvis/')) {
+    try {
+      const body = req.method === 'POST' ? await getBody(req) : null;
+      const result = await jarvisHandler.handle(pathname, body, {
+        json: (status, data) => json(res, status, data),
+        getBody: () => getBody(req)
+      });
+      if (result === null) return json(res, 404, { ok: false, error: 'unknown jarvis endpoint' });
+      return json(res, result.ok === false ? 500 : 200, result);
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
+  }
   if (pathname === '/api/brains/select') {
     const body = await getBody(req);
     try {
@@ -2732,6 +2748,12 @@ async function start(options = {}) {
       logFn(`[brain-pool] start failed: ${e.message}`);
     });
   }, 1500);
+  // Install Jarvis voice/vision/skills layer
+  try {
+    jarvisHandler = jarvis.installJarvisEndpoints({ getDataRoot: () => dataRoot }, { log: logFn });
+  } catch (e) {
+    logFn(`[jarvis] install failed: ${e.message}`);
+  }
   return { port: PORT, dataRoot };
 }
 
