@@ -4,37 +4,14 @@ Command failures and integration errors.
 
 ---
 
-## 2026-06-05 - ASAR inspection module missing
+## 2026-06-07 — NSIS cannot package all-in-one 3-brain Jarvis archive
 
-- **Context:** Final Electron release audit.
-- **Command class:** Node `require('asar')` package listing.
-- **Failure:** Project did not have the `asar` module available for direct package listing.
-- **Resolution:** Do not install a package solely for this audit. Use Electron Builder success plus portable artifact smoke test to prove `portable-core.js` and `backends.js` were included and working.
+**Context:** After correcting release strategy from separate Lite/Standard/Pro to a single all-in-one Jarvis build carrying all three GGUFs, both `nsis` setup and `portable` targets failed in Electron Builder.
 
+**Failure:** `makensis.exe process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE` with `File: failed creating mmap of ... abuz8-os-1.0.0-x64.nsis.7z`.
 
-## [ERR-20260605-variant-hash] Windows PowerShell hash cmdlet unavailable
+**Cause:** The bundled all-in-one app archive is approximately 2.95GB (`APP_64_UNPACKED_SIZE=2955040 KB`). NSIS/portable target cannot mmap/embed this archive.
 
-**Logged**: 2026-06-05T10:05:00-04:00
-**Priority**: medium
-**Context**: Variant build script completed all Electron Builder outputs, then failed writing SHA256SUMS because the invoked Windows PowerShell host did not expose Get-FileHash.
-**Fix**: Patched scripts/build-brain-variants.ps1 to compute SHA-256 with System.Security.Cryptography.SHA256 directly, which avoids depending on Get-FileHash availability.
+**Correct workaround:** Ship the verified `win-unpacked` folder as the USB/all-in-one folder package, or use a different installer technology that supports >3GB payloads (WiX/MSIX/custom bootstrapper/7z SFX 64-bit). Do not split the brains into Lite/Standard/Pro as the release target, because the user explicitly requires all three brains together.
 
-## [ERR-20260605-inline-powershell-dollar-expansion] Inline PowerShell syntax check expanded `$null`
-
-**Logged**: 2026-06-05T15:25:00-04:00
-**Priority**: low
-**Context**: Release verification script syntax check was passed through a double-quoted shell string. `$null` was expanded before PowerShell parsed the command, producing stray `=` command errors even though the target scripts were valid.
-**Fix**: Use a here-string piped into `powershell -Command -`, or run the script file directly, when checking PowerShell syntax from Codex.
-
-
-## 2026-06-05 - PowerShell verifier variable collision
-
-- Context: Extended action-tool verifier failed because a local variable was named $Host, which conflicts with PowerShell's read-only built-in $Host.
-- Fix: Use non-reserved names such as $hostCall for command responses in verifier scripts.
-
-## 2026-06-06 - Copy-Item wildcard with LiteralPath
-
-- Context: Copying the final ABUZ8 Consumer Pro release folder to a removable card.
-- Failure: `Copy-Item -LiteralPath (Join-Path $src '*')` treated the asterisk literally and failed with "Cannot find path ...\\*".
-- Fix: Use `Copy-Item -Path (Join-Path $src '*')` when copying folder contents with a wildcard, or enumerate files explicitly and pass each path as a literal path.
-
+**Verified working artifact:** `E:\ABU\ABUZ8_OS_DIST\electron\out-jarvis-all\win-unpacked\ABUZ8 OS.exe` with all three GGUFs present and `/api/brains/pool` proving 3/3 live.
