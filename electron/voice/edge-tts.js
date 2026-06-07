@@ -57,48 +57,30 @@ async function listVoices() {
   return new Promise((resolve) => {
     const proc = spawn(py, ['-m', 'edge_tts', '--list-voices'], { windowsHide: true });
     let out = '';
-    let err = '';
     proc.stdout.on('data', (d) => { out += d; });
-    proc.stderr.on('data', (d) => { err += d; });
     proc.on('exit', () => {
       const voices = [];
-      // Newer edge-tts emits per voice across multiple lines:
-      //   Name: af-ZA-AdriNeural
-      //   Gender: Female
-      // We collect Name lines and pair with the following Gender if present.
-      const lines = out.split(/\r?\n/);
-      let pendingName = null;
-      for (const raw of lines) {
+      const seen = new Set();
+      for (const raw of out.split(/\r?\n/)) {
         const line = raw.trim();
-        const mName = line.match(/^Name:\s*([A-Za-z]{2}-[A-Za-z]{2,4}(?:-[A-Za-z]+)?[A-Za-z]+(?:Neural|Multilingual)?)\b/);
-        const mGender = line.match(/^Gender:\s*(\w+)/);
-        if (mName) {
-          pendingName = mName[1];
-        } else if (mGender && pendingName) {
-          const name = pendingName;
-          const parts = name.split('-');
-          const locale = parts.length >= 2 ? parts.slice(0, 2).join('-') : name;
-          const shortName = parts.slice(2).join('-').replace(/Neural$/, '');
-          voices.push({
-            name,
-            short_name: shortName || name,
-            locale,
-            gender: mGender[1],
-            engine: 'edge-tts'
-          });
-          pendingName = null;
-        }
-      }
-      // Fallback: single-line regex if multi-line failed
-      if (voices.length === 0) {
-        const re = /Name:\s*([A-Za-z]{2}-[A-Za-z]{2,4}(?:-[A-Za-z]+)?[A-Za-z]+(?:Neural|Multilingual)?)[\s\S]*?Gender:\s*(\w+)/g;
-        let m;
-        while ((m = re.exec(out)) !== null) {
-          const name = m[1];
-          const parts = name.split('-');
-          const locale = parts.length >= 2 ? parts.slice(0, 2).join('-') : name;
-          voices.push({ name, short_name: name, locale, gender: m[2], engine: 'edge-tts' });
-        }
+        if (!line || line.startsWith('-') || line.startsWith('Name ')) continue;
+        // Edge-TTS 7.x table format:
+        // en-US-AriaNeural  Female  General  Friendly, Positive
+        const m = line.match(/^([a-z]{2,3}-[A-Z]{2,4}(?:-[A-Za-z]+)?[A-Za-z]+(?:Neural|MultilingualNeural|Multilingual)?)\s+(Male|Female|Neutral)\b/i);
+        if (!m) continue;
+        const name = m[1];
+        if (seen.has(name)) continue;
+        seen.add(name);
+        const parts = name.split('-');
+        const locale = parts.length >= 2 ? parts.slice(0, 2).join('-') : name;
+        const shortName = parts.slice(2).join('-').replace(/Neural$/i, '');
+        voices.push({
+          name,
+          short_name: shortName || name,
+          locale,
+          gender: m[2],
+          engine: 'edge-tts'
+        });
       }
       voicesCache = voices;
       voicesCacheTime = Date.now();
