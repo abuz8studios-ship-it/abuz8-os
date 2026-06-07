@@ -244,6 +244,7 @@ function localToolsList() {
     { name: 'web_search', type: 'network', status: 'ready', description: 'Search the public web for current information and return a short sourced result.' },
     { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, chrome, edge, browser, calc, or explorer.' },
     { name: 'draw_monkey_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Create a simple monkey drawing in the portable sandbox and open it in Microsoft Paint.' },
+    { name: 'draw_cartoon_rabbit_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Create an original cartoon rabbit drawing in the portable sandbox and open it in Microsoft Paint.' },
     { name: 'screenshot', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Capture the primary screen to the portable data shots folder.' },
     { name: 'file_write', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Write a text file inside the portable data sandbox only.' },
     { name: 'shell_run', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Run only allowlisted shell probes: whoami, hostname, or dir. Default deny.' },
@@ -253,6 +254,50 @@ function localToolsList() {
     { name: 'embedded_brain_runtime', type: 'local-runtime', status: brain?.embedded ? 'ready' : 'fallback', description: brain?.embedded ? `${brain.name} selected automatically.` : 'No embedded GGUF selected.' }
   ];
   return builtIns.concat(readCustomTools());
+}
+
+function modelRoots() {
+  return [
+    path.join(dataRoot, 'models'),
+    path.join(dataRoot, 'brain'),
+    path.join(__dirname, 'brain'),
+    path.join(__dirname, 'models'),
+    process.env.ABUZ8_MODELS_DIR,
+    'E:\\ABU\\MODELS'
+  ].filter(Boolean);
+}
+
+function listLocalModelAssets() {
+  const rows = [];
+  const wanted = /\.(gguf|onnx|pth|safetensors|bin|wav)$/i;
+  const walk = (dir, depth = 0) => {
+    if (depth > 3 || rows.length >= 160) return;
+    let items = [];
+    try { items = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const item of items) {
+      const full = path.join(dir, item.name);
+      if (item.isDirectory()) {
+        if (!/node_modules|__pycache__|\.git|site-packages|venv/i.test(full)) walk(full, depth + 1);
+      } else if (wanted.test(item.name)) {
+        let stat = null;
+        try { stat = fs.statSync(full); } catch {}
+        rows.push({
+          name: item.name,
+          path: full,
+          kind: /\.gguf$/i.test(item.name) ? 'reasoning' : /\.wav$/i.test(item.name) ? 'reference-voice' : /\.(onnx|pth)$/i.test(item.name) ? 'voice-or-vision' : 'model',
+          mb: stat ? Math.round((stat.size / 1024 / 1024) * 10) / 10 : null
+        });
+      }
+    }
+  };
+  modelRoots().forEach((r) => walk(r));
+  const seen = new Set();
+  return rows.filter((r) => {
+    const key = r.path.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function readCustomTools() {
@@ -387,6 +432,58 @@ async function actionDrawMonkeyInPaint(args = {}) {
   return { ...opened, app: 'Paint', file, bytes: fs.statSync(file).size };
 }
 
+async function actionDrawCartoonRabbitInPaint(args = {}) {
+  requireActionConsent();
+  const artDir = safeMkdir(path.join(dataRoot, 'art'));
+  const file = path.join(artDir, `paint-cartoon-rabbit-${Date.now()}.png`);
+  const scriptFile = path.join(safeMkdir(path.join(dataRoot, 'cache')), `draw-rabbit-${process.pid}-${Date.now()}.ps1`);
+  const caption = String(args.caption || 'Original cartoon rabbit drawn locally').replace(/'/g, "''").slice(0, 90);
+  const script = [
+    'param([string]$OutFile, [string]$Caption)',
+    'Add-Type -AssemblyName System.Drawing',
+    '$bmp = New-Object System.Drawing.Bitmap 900, 700',
+    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+    '$g.FillRectangle([System.Drawing.Brushes]::White, 0, 0, 900, 700)',
+    '$fur = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(205, 214, 210))',
+    '$fur2 = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(152, 168, 160))',
+    '$pink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 176, 196))',
+    '$ink = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(35, 45, 42), 6)',
+    '$thin = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(35, 45, 42), 3)',
+    '$smile = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(60, 70, 66), 4)',
+    '$g.FillEllipse($fur, 285, 88, 105, 275)',
+    '$g.FillEllipse($fur, 510, 88, 105, 275)',
+    '$g.FillEllipse($pink, 318, 125, 42, 205)',
+    '$g.FillEllipse($pink, 543, 125, 42, 205)',
+    '$g.FillEllipse($fur, 250, 220, 400, 350)',
+    '$g.FillEllipse($fur2, 330, 405, 240, 120)',
+    '$g.FillEllipse([System.Drawing.Brushes]::White, 355, 330, 70, 85)',
+    '$g.FillEllipse([System.Drawing.Brushes]::White, 475, 330, 70, 85)',
+    '$g.FillEllipse([System.Drawing.Brushes]::Black, 383, 365, 22, 25)',
+    '$g.FillEllipse([System.Drawing.Brushes]::Black, 503, 365, 22, 25)',
+    '$g.FillEllipse($pink, 426, 422, 48, 35)',
+    '$g.DrawArc($smile, 397, 438, 55, 45, 20, 130)',
+    '$g.DrawArc($smile, 448, 438, 55, 45, 30, 130)',
+    '$g.DrawLine($thin, 390, 430, 285, 395)',
+    '$g.DrawLine($thin, 390, 452, 278, 455)',
+    '$g.DrawLine($thin, 510, 430, 615, 395)',
+    '$g.DrawLine($thin, 510, 452, 622, 455)',
+    '$g.DrawEllipse($ink, 250, 220, 400, 350)',
+    '$g.DrawEllipse($thin, 285, 88, 105, 275)',
+    '$g.DrawEllipse($thin, 510, 88, 105, 275)',
+    '$font = New-Object System.Drawing.Font "Segoe UI", 22, ([System.Drawing.FontStyle]::Bold)',
+    '$g.DrawString($Caption, $font, [System.Drawing.Brushes]::Black, 220, 610)',
+    '$bmp.Save($OutFile, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '$g.Dispose(); $bmp.Dispose(); $fur.Dispose(); $fur2.Dispose(); $pink.Dispose(); $ink.Dispose(); $thin.Dispose(); $smile.Dispose(); $font.Dispose()'
+  ].join(os.EOL);
+  fs.writeFileSync(scriptFile, script, 'utf8');
+  const drawn = await runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, file, caption], 20000);
+  try { fs.unlinkSync(scriptFile); } catch {}
+  if (!drawn.ok || !fs.existsSync(file)) throw new Error(drawn.stderr || drawn.stdout || 'Rabbit drawing failed.');
+  const opened = await startProcessDetached('mspaint.exe', [file]);
+  return { ...opened, app: 'Paint', file, bytes: fs.statSync(file).size };
+}
+
 async function actionOpenUrl(args = {}) {
   requireActionConsent();
   const url = normalizeHttpUrl(args.url || args.href || args.query);
@@ -452,13 +549,17 @@ async function actionWebSearch(args = {}) {
       const xml = await fetchTextUrl(rssUrl);
       const items = parseRssItems(xml, 5);
       if (items.length) {
-        return {
+        const result = {
           query,
           source: 'Bing News RSS',
           answer: `Top current results for "${query}":`,
           url: rssUrl,
           related: items.map((x) => ({ text: `${x.title}${x.pubDate ? ` (${x.pubDate})` : ''}`, url: x.url }))
         };
+        if (args.open_browser && actionConsentGranted) {
+          result.opened = await startProcessDetached('rundll32.exe', ['url.dll,FileProtocolHandler', rssUrl]).catch((e) => ({ ok: false, error: e.message }));
+        }
+        return result;
       }
     } catch {}
   }
@@ -467,7 +568,7 @@ async function actionWebSearch(args = {}) {
   const related = Array.isArray(data.RelatedTopics)
     ? data.RelatedTopics.flatMap((t) => t.Topics || [t]).filter((t) => t && (t.Text || t.FirstURL)).slice(0, 5)
     : [];
-  return {
+  const result = {
     query,
     source: 'DuckDuckGo Instant Answer',
     answer: data.AbstractText || data.Answer || '',
@@ -475,6 +576,10 @@ async function actionWebSearch(args = {}) {
     url: data.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
     related: related.map((t) => ({ text: t.Text || '', url: t.FirstURL || '' }))
   };
+  if (args.open_browser && actionConsentGranted) {
+    result.opened = await startProcessDetached('rundll32.exe', ['url.dll,FileProtocolHandler', result.url]).catch((e) => ({ ok: false, error: e.message }));
+  }
+  return result;
 }
 
 function sandboxFilePath(relpath) {
@@ -597,6 +702,9 @@ async function callLocalTool(name, args = {}) {
   if (isTool('draw_monkey_in_paint', 'paint_monkey', 'draw_monkey')) {
     return { ok: true, tool: toolName, result: await actionDrawMonkeyInPaint(body) };
   }
+  if (isTool('draw_cartoon_rabbit_in_paint', 'paint_rabbit', 'draw_rabbit')) {
+    return { ok: true, tool: toolName, result: await actionDrawCartoonRabbitInPaint(body) };
+  }
   if (isTool('screenshot')) {
     return { ok: true, tool: toolName, result: await actionScreenshot(body) };
   }
@@ -690,7 +798,27 @@ function splitPath(reqUrl) {
   return { pathname: u.pathname.replace(/\/+$/, '') || '/', searchParams: u.searchParams };
 }
 
-function synthesizeWindowsTts(textValue, voiceName = '') {
+function voiceProfiles(voices = []) {
+  const lower = (v) => String(v || '').toLowerCase();
+  const male = voices.find((v) => /guy|david|mark|george|james|daniel|male/i.test(v)) || voices.find(Boolean) || '';
+  const female = voices.find((v) => /zira|jenny|aria|susan|eva|hazel|samantha|female/i.test(v)) || voices.find(Boolean) || '';
+  return [
+    { id: 'auto', label: 'Auto', voice: '', rate: 0, pitch: 1, description: 'Use the system default voice.' },
+    { id: 'male', label: 'Man', voice: male, rate: -1, pitch: 0.95, description: 'Lower, calmer local voice when available.' },
+    { id: 'female', label: 'Woman', voice: female, rate: 0, pitch: 1.05, description: 'Clearer local voice when available.' },
+    { id: 'cartoon', label: 'Cartoon', voice: female || male, rate: 3, pitch: 1.22, description: 'Playful cartoon-style voice profile; not an imitation of a real performer or protected character.' }
+  ].map((p) => ({ ...p, voice_available: !p.voice || voices.some((v) => lower(v) === lower(p.voice)) }));
+}
+
+function resolveVoiceProfile(input, voices = []) {
+  const wanted = String(input || '').trim();
+  const profiles = voiceProfiles(voices);
+  const profile = profiles.find((p) => p.id === slug(wanted) || p.label.toLowerCase() === wanted.toLowerCase());
+  if (profile) return profile;
+  return { id: 'custom', label: wanted || 'Auto', voice: wanted, rate: 0, pitch: 1, description: 'Custom installed Windows voice.' };
+}
+
+function synthesizeWindowsTts(textValue, voiceName = '', voiceProfile = '') {
   return new Promise((resolve, reject) => {
     if (process.platform !== 'win32') return reject(new Error('Native TTS is only bundled for Windows in this build.'));
     const textClean = String(textValue || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
@@ -699,30 +827,40 @@ function synthesizeWindowsTts(textValue, voiceName = '') {
     const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const inputFile = path.join(ttsDir, `${id}.txt`);
     const outputFile = path.join(ttsDir, `${id}.wav`);
-    fs.writeFileSync(inputFile, textClean, 'utf8');
-    const scriptBody = [
-      'param([string]$InputFile,[string]$OutputFile,[string]$VoiceName)',
-      'Add-Type -AssemblyName System.Speech',
-      '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
-      'if ($VoiceName) { try { $synth.SelectVoice($VoiceName) } catch {} }',
-      '$synth.Rate = 0',
-      '$synth.Volume = 100',
-      '$synth.SetOutputToWaveFile($OutputFile)',
-      '$synth.Speak([IO.File]::ReadAllText($InputFile))',
-      '$synth.Dispose()'
-    ].join('; ');
-    const script = `& { ${scriptBody} }`;
-    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, inputFile, outputFile, String(voiceName || '')], { windowsHide: true, timeout: 30000 }, (err) => {
-      try { fs.unlinkSync(inputFile); } catch {}
-      if (err) return reject(err);
-      try {
-        const wav = fs.readFileSync(outputFile);
-        try { fs.unlinkSync(outputFile); } catch {}
-        resolve(wav);
-      } catch (e) {
-        reject(e);
-      }
-    });
+    const scriptFile = path.join(ttsDir, `${id}.ps1`);
+    listWindowsTtsVoices().then((voices) => {
+      const profile = resolveVoiceProfile(voiceProfile || voiceName || '', voices);
+      const finalVoice = voiceName && !['auto', 'male', 'female', 'cartoon'].includes(slug(voiceName)) ? voiceName : profile.voice;
+      const rate = Number.isFinite(profile.rate) ? profile.rate : 0;
+      const textForVoice = profile.id === 'cartoon'
+        ? textClean.replace(/\bhello\b/ig, 'well hello').replace(/[.]{1,}/g, '!')
+        : textClean;
+      fs.writeFileSync(inputFile, textForVoice, 'utf8');
+      const scriptBody = [
+        'param([string]$InputFile,[string]$OutputFile,[string]$VoiceName,[int]$Rate)',
+        'Add-Type -AssemblyName System.Speech',
+        '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+        'if ($VoiceName) { try { $synth.SelectVoice($VoiceName) } catch {} }',
+        '$synth.Rate = $Rate',
+        '$synth.Volume = 100',
+        '$synth.SetOutputToWaveFile($OutputFile)',
+        '$synth.Speak([IO.File]::ReadAllText($InputFile))',
+        '$synth.Dispose()'
+      ].join(os.EOL);
+      fs.writeFileSync(scriptFile, scriptBody, 'utf8');
+      execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, inputFile, outputFile, String(finalVoice || ''), String(rate)], { windowsHide: true, timeout: 30000 }, (err) => {
+        try { fs.unlinkSync(inputFile); } catch {}
+        try { fs.unlinkSync(scriptFile); } catch {}
+        if (err) return reject(err);
+        try {
+          const wav = fs.readFileSync(outputFile);
+          try { fs.unlinkSync(outputFile); } catch {}
+          resolve(wav);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).catch(reject);
   });
 }
 
@@ -1156,10 +1294,11 @@ function agentToolInstructions() {
     '- web_search {"query":"current topic"}',
     '- open_url {"url":"https://example.com"}',
     '- open_app {"name":"notepad|mspaint|chrome|edge|browser|calc|explorer"}',
+    '- draw_cartoon_rabbit_in_paint {"caption":"optional caption"}',
     '- screenshot {}',
     '- file_write {"relpath":"notes/example.txt","content":"..."}',
     '- shell_run {"cmd":"whoami|hostname|dir"}',
-    'Action tools require the user to enable Allow actions for this session. Never invent unsupported tools.',
+    'Action tools require the user to enable Allow actions for this session. Never invent unsupported tools. For protected characters, create an original safe drawing instead of claiming to copy the exact character.',
     ''
   ].join('\n');
 }
@@ -1282,6 +1421,9 @@ function inferConsumerToolCall(prompt) {
   if (/\b(draw|paint|create)\b.*\bmonkey\b/.test(lower) && /\b(paint|mspaint|microsoft paint)\b/.test(lower)) {
     return { tool: 'draw_monkey_in_paint', args: { caption: 'ABUZ8 OS local desktop action proof' } };
   }
+  if (/\b(draw|paint|create)\b.*\b(bugs bunny|bunny|rabbit|cartoon rabbit)\b/.test(lower) && /\b(paint|mspaint|microsoft paint)\b/.test(lower)) {
+    return { tool: 'draw_cartoon_rabbit_in_paint', args: { caption: 'Original cartoon rabbit - ABUZ8 OS' } };
+  }
   if (/\b(open|launch|start)\b.*\b(paint|mspaint)\b/.test(lower)) return { tool: 'open_app', args: { name: 'mspaint' } };
   if (/\b(open|launch|start)\b.*\bnotepad\b/.test(lower)) return { tool: 'open_app', args: { name: 'notepad' } };
   if (/\b(open|launch|start)\b.*\b(calc|calculator)\b/.test(lower)) return { tool: 'open_app', args: { name: 'calc' } };
@@ -1290,8 +1432,8 @@ function inferConsumerToolCall(prompt) {
   const urlMatch = msg.match(/\bhttps?:\/\/[^\s"'<>]+/i);
   if (urlMatch && /\b(open|visit|go to|browse)\b/i.test(msg)) return { tool: 'open_url', args: { url: urlMatch[0] } };
   if (/\b(search|look up|google|duckduckgo|internet|online|current|latest|today|news|who is|what is)\b/i.test(msg)) {
-    const q = msg.replace(/\b(search|look up|google|duckduckgo|the|web|internet|online|for)\b/gi, ' ').replace(/\s+/g, ' ').trim();
-    if (q) return { tool: 'web_search', args: { query: q } };
+    const q = msg.replace(/\b(search|look up|google|duckduckgo|the|web|internet|online|for|show me|show|open|browser|in the browser|in browser)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (q) return { tool: 'web_search', args: { query: q, open_browser: /\b(show|open|browser|watch|see)\b/i.test(msg) } };
   }
   if (/\b(hostname|machine name)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'hostname' } };
   if (/\b(whoami|current user)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'whoami' } };
@@ -1303,11 +1445,14 @@ function summarizeToolResult(tool, result) {
   const payload = result?.result ?? result;
   if (tool === 'open_app') return `Done. Opened ${payload.app || payload.file || 'the requested app'}.`;
   if (tool === 'draw_monkey_in_paint') return `Done. Drew a monkey image and opened it in Paint: ${payload.file}.`;
+  if (tool === 'draw_cartoon_rabbit_in_paint') return `Done. Drew an original cartoon rabbit and opened it in Paint: ${payload.file}.`;
   if (tool === 'open_url') return `Done. Opened ${payload.url || 'the requested URL'} in the default browser.`;
   if (tool === 'web_search') {
     const lines = [];
     if (payload.answer) lines.push(payload.answer);
     if (payload.related && payload.related.length) lines.push(payload.related.slice(0, 3).map((r, i) => `${i + 1}. ${r.text}`).join('\n'));
+    if (payload.opened?.ok) lines.push('I also opened the source/search page in the browser.');
+    if (!lines.length || (lines.length === 1 && String(lines[0]).startsWith('Source:'))) lines.unshift(`I searched for "${payload.query || 'your query'}". No instant answer came back, so use the source/search page for the live results.`);
     lines.push(`Source: ${payload.url || payload.source || 'web search'}`);
     return lines.filter(Boolean).join('\n\n');
   }
@@ -1921,6 +2066,8 @@ async function route(req, res) {
       streaming_chat_tts: true,
       recognizers,
       voices,
+      voice_profiles: voiceProfiles(voices),
+      local_model_assets: listLocalModelAssets().slice(0, 40),
       note: 'This build uses native Windows speech APIs for offline voice in/out when installed on the target machine. Browser speech remains the fallback path.'
     });
   }
@@ -1936,7 +2083,7 @@ async function route(req, res) {
   if (pathname === '/api/tts' || pathname === '/api/tts/stream') {
     const body = await getBody(req);
     try {
-      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '');
+      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '', body.profile || body.voice_profile || '');
       return binary(res, 200, wav, 'audio/wav');
     } catch (e) {
       return json(res, 500, { ok: false, error: e.message, fallback: 'browser-tts' });
@@ -1945,11 +2092,14 @@ async function route(req, res) {
   if (pathname === '/api/avatar/speak') {
     const body = await getBody(req);
     try {
-      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '');
+      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '', body.profile || body.voice_profile || '');
       return binary(res, 200, wav, 'audio/wav');
     } catch (e) {
       return json(res, 200, { ok: true, queued: false, fallback: 'browser-tts', error: e.message });
     }
+  }
+  if (pathname === '/api/models/local' || pathname === '/api/local-models') {
+    return json(res, 200, { ok: true, roots: modelRoots(), models: listLocalModelAssets() });
   }
   if (pathname === '/api/avatar/health') {
     const voices = await listWindowsTtsVoices();
