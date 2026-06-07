@@ -245,7 +245,9 @@ function Test-ActionTools {
   } -TimeoutSec 60
   $newMonkeyPaint = if ($monkey.Ok) { Wait-NewProcess -Names @("mspaint") -Before $beforeMonkeyPaint -TimeoutSec 15 } else { @() }
   $monkeyFile = if ($monkey.Ok) { [string]$monkey.Value.tool_result.result.file } else { "" }
+  $monkeyNotesFile = if ($monkey.Ok) { [string]$monkey.Value.tool_result.result.notes_file } else { "" }
   $monkeyExists = $monkeyFile -and (Test-Path -LiteralPath $monkeyFile)
+  $monkeyNotesExists = $monkeyNotesFile -and (Test-Path -LiteralPath $monkeyNotesFile)
   $monkeyInfo = if ($monkeyExists) { Get-Item -LiteralPath $monkeyFile } else { $null }
   $monkeyBytes = if ($null -ne $monkeyInfo) { [int64]$monkeyInfo.Length } else { 0 }
   if ($newMonkeyPaint.Count -gt 0) {
@@ -256,11 +258,15 @@ function Test-ActionTools {
     Remove-Item -LiteralPath $monkeyFile -Force -ErrorAction SilentlyContinue
     $cleanup += "monkey drawing artifact deleted"
   }
+  if ($monkeyNotesExists) {
+    Remove-Item -LiteralPath $monkeyNotesFile -Force -ErrorAction SilentlyContinue
+    $cleanup += "monkey research notes artifact deleted"
+  }
   $proof.agentic_chat_draw_monkey_in_paint = New-ToolProof `
-    -Pass:($monkey.Ok -and $newMonkeyPaint.Count -gt 0 -and [string]$monkey.Value.tool_call.tool -eq "draw_monkey_in_paint" -and $monkeyExists -and $monkeyBytes -gt 1000) `
-    -Reason $(if ($monkey.Ok) { "chat agent path created a monkey PNG and opened it in Paint" } else { $monkey.Error }) `
-    -Observed @{ new_mspaint_pids = $newMonkeyPaint; accepted = $monkey.Ok; tool_call = $monkey.Value.tool_call; file = $monkeyFile; bytes = $monkeyBytes } `
-    -Cleaned:(($newMonkeyPaint.Count -gt 0) -and $monkeyExists)
+    -Pass:($monkey.Ok -and $newMonkeyPaint.Count -gt 0 -and [string]$monkey.Value.tool_call.tool -eq "create_visual_in_paint" -and [string]$monkey.Value.tool_call.args.subject -eq "monkey" -and $monkeyExists -and $monkeyNotesExists -and $monkeyBytes -gt 1000) `
+    -Reason $(if ($monkey.Ok) { "chat agent path researched a monkey, created a PNG, saved notes, and opened it in Paint" } else { $monkey.Error }) `
+    -Observed @{ new_mspaint_pids = $newMonkeyPaint; accepted = $monkey.Ok; tool_call = $monkey.Value.tool_call; file = $monkeyFile; notes_file = $monkeyNotesFile; bytes = $monkeyBytes } `
+    -Cleaned:(($newMonkeyPaint.Count -gt 0) -and $monkeyExists -and $monkeyNotesExists)
 
   $shot = Try-CoreJson -Method POST -Path "/api/tools/call" -Body @{
     tool = "screenshot"

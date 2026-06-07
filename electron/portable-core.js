@@ -235,6 +235,7 @@ function localToolsList() {
     { name: 'abuz8_tool_create', type: 'mcp', status: 'ready', description: 'Create a local ABUZ8 tool definition.' },
     { name: 'abuz8_tool_call', type: 'mcp', status: 'ready', description: 'Execute a local ABUZ8 built-in or registered tool by name.' },
     { name: 'abuz8_mission_board', type: 'mcp', status: 'ready', description: 'Read the local mission/Kanban board.' },
+    { name: 'abuz8_mission_auto_probe', type: 'mcp', status: 'ready', description: 'Probe the current host device and store a local Mission Control readiness profile.' },
     { name: 'abuz8_mission_task_create', type: 'mcp', status: 'ready', description: 'Create or update a mission task from Claude Desktop.' },
     { name: 'abuz8_mission_task_move', type: 'mcp', status: 'ready', description: 'Move a mission task between Kanban columns.' },
     { name: 'huggingface_model_download', type: 'local-api', status: 'permission-gated', description: 'Download model files to the local model shelf with allow_network_download.' },
@@ -243,8 +244,8 @@ function localToolsList() {
     { name: 'open_url', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an http/https URL in the default browser after Allow actions consent.' },
     { name: 'web_search', type: 'network', status: 'ready', description: 'Search the public web for current information and return a short sourced result.' },
     { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, chrome, edge, browser, calc, or explorer.' },
-    { name: 'draw_monkey_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Create a simple monkey drawing in the portable sandbox and open it in Microsoft Paint.' },
-    { name: 'draw_cartoon_rabbit_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Create an original cartoon rabbit drawing in the portable sandbox and open it in Microsoft Paint.' },
+    { name: 'create_visual_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Research a requested visual subject, create an original image from current reference notes, and open it in Microsoft Paint.' },
+    { name: 'draw_monkey_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Legacy local proof tool. Prefer create_visual_in_paint for user creation requests.' },
     { name: 'screenshot', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Capture the primary screen to the portable data shots folder.' },
     { name: 'file_write', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Write a text file inside the portable data sandbox only.' },
     { name: 'shell_run', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Run only allowlisted shell probes: whoami, hostname, or dir. Default deny.' },
@@ -582,6 +583,117 @@ async function actionWebSearch(args = {}) {
   return result;
 }
 
+function extractCreativeSubject(text) {
+  const raw = String(text || '').trim();
+  const looksLike = raw.match(/\bwhat\s+(.+?)\s+looks?\s+like\b/i);
+  const ofThing = raw.match(/\b(?:picture|image|drawing|painting|sketch|illustration|art)\s+of\s+(.+?)(?:\s+in\s+(?:paint|mspaint|microsoft paint)|$)/i);
+  const drawThing = raw.match(/\b(?:draw|create|make|generate|design|sketch|illustrate)\s+(?:me\s+)?(?:a|an|the)?\s*(.+?)(?:\s+in\s+(?:paint|mspaint|microsoft paint)|[.!?]|$)/i);
+  let subject = (looksLike && looksLike[1]) || (ofThing && ofThing[1]) || (drawThing && drawThing[1]) || raw;
+  subject = subject
+    .replace(/\bresearch\b.*?\bwhat\b/gi, ' ')
+    .replace(/\bopen\s+(?:microsoft\s+)?paint\s+(?:and|then)?\b/gi, ' ')
+    .replace(/\b(draw|paint|create|make|generate|design|sketch|illustrate)\b/gi, ' ')
+    .replace(/\b(a|an|the|me|for me|open|microsoft|picture|image|drawing|painting|sketch|illustration|art|looks like|look like|in paint|with paint|microsoft paint|mspaint)\b/gi, ' ')
+    .replace(/\b(and|then|please|using|from|reference|references)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return subject || 'requested subject';
+}
+
+function visualSearchQuery(subject) {
+  return `what does ${subject} look like visual features reference`;
+}
+
+function sanitizePaintText(value, limit = 220) {
+  return String(value || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[^\x20-\x7E]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, limit)
+    .replace(/'/g, "''");
+}
+
+function inferVisualTraits(subject, research) {
+  const text = `${subject} ${research?.answer || ''} ${(research?.related || []).map((r) => r.text).join(' ')}`.toLowerCase();
+  const traits = [];
+  if (/\b(rabbit|bunny|hare|bugs bunny)\b/.test(text)) traits.push('long ears', 'rounded muzzle', 'large eyes', 'soft grey/white body');
+  if (/\b(monkey|ape|chimp)\b/.test(text)) traits.push('round ears', 'tan face', 'brown fur', 'expressive grin');
+  if (/\b(car|vehicle|truck)\b/.test(text)) traits.push('wheels', 'windshield', 'body panels', 'road stance');
+  if (/\b(robot|android)\b/.test(text)) traits.push('metal body', 'screen eyes', 'jointed limbs', 'control panel');
+  if (/\bflower|rose|tulip\b/.test(text)) traits.push('stem', 'petals', 'leaves', 'bright center');
+  if (/\bhouse|building|home\b/.test(text)) traits.push('roof', 'windows', 'door', 'simple structure');
+  if (/\bdragon\b/.test(text)) traits.push('wings', 'horns', 'tail', 'scales');
+  if (/\bbird|eagle|falcon\b/.test(text)) traits.push('beak', 'wings', 'tail feathers', 'perched body');
+  if (!traits.length) traits.push('main silhouette', 'distinctive colors', 'recognizable features', 'clear outline');
+  return [...new Set(traits)].slice(0, 6);
+}
+
+async function actionCreateVisualInPaint(args = {}) {
+  requireActionConsent();
+  const subject = extractCreativeSubject(args.subject || args.prompt || args.caption || args.query || 'requested subject');
+  const exactCharacter = /\bbugs bunny\b/i.test(subject);
+  const query = visualSearchQuery(subject);
+  const research = await actionWebSearch({ query, open_browser: args.open_browser !== false });
+  const traits = inferVisualTraits(subject, research);
+  const artDir = safeMkdir(path.join(dataRoot, 'art'));
+  const stamp = Date.now();
+  const file = path.join(artDir, `paint-${slug(subject).slice(0, 44) || 'visual'}-${stamp}.png`);
+  const notesFile = path.join(artDir, `paint-${slug(subject).slice(0, 44) || 'visual'}-${stamp}-research.json`);
+  const scriptFile = path.join(safeMkdir(path.join(dataRoot, 'cache')), `create-visual-${process.pid}-${stamp}.ps1`);
+  const title = exactCharacter ? `Original cartoon rabbit inspired by researched traits` : `Original ${subject}`;
+  const safeSubject = sanitizePaintText(subject, 80);
+  const safeTitle = sanitizePaintText(title, 100);
+  const safeTraits = sanitizePaintText(traits.join(' | '), 180);
+  const safeSource = sanitizePaintText(research.url || research.source || 'web search', 140);
+  const script = [
+    'param([string]$OutFile, [string]$Subject, [string]$Title, [string]$Traits, [string]$Source)',
+    'Add-Type -AssemblyName System.Drawing',
+    '$bmp = New-Object System.Drawing.Bitmap 1100, 780',
+    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
+    '$g.FillRectangle([System.Drawing.Brushes]::White, 0, 0, 1100, 780)',
+    '$ink = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(30, 45, 39), 6)',
+    '$thin = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(30, 45, 39), 3)',
+    '$accent = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(112, 191, 146))',
+    '$soft = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(224, 239, 230))',
+    '$warm = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(245, 205, 126))',
+    '$dark = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(30, 45, 39))',
+    '$fontTitle = New-Object System.Drawing.Font "Segoe UI", 26, ([System.Drawing.FontStyle]::Bold)',
+    '$font = New-Object System.Drawing.Font "Segoe UI", 15, ([System.Drawing.FontStyle]::Regular)',
+    '$fontSmall = New-Object System.Drawing.Font "Consolas", 11, ([System.Drawing.FontStyle]::Regular)',
+    '$g.DrawString($Title, $fontTitle, $dark, 46, 34)',
+    '$g.DrawString(("Subject: " + $Subject), $font, $dark, 50, 86)',
+    '$g.DrawString(("Researched traits: " + $Traits), $fontSmall, $dark, 50, 690)',
+    '$g.DrawString(("Source/search: " + $Source), $fontSmall, $dark, 50, 718)',
+    '$lower = $Subject.ToLowerInvariant()',
+    'if ($lower -match "rabbit|bunny|hare|bugs bunny") {',
+    '  $g.FillEllipse($soft, 440, 160, 95, 260); $g.FillEllipse($soft, 585, 160, 95, 260)',
+    '  $g.FillEllipse($accent, 472, 205, 32, 170); $g.FillEllipse($accent, 618, 205, 32, 170)',
+    '  $g.FillEllipse($soft, 360, 350, 400, 280); $g.FillEllipse([System.Drawing.Brushes]::White, 445, 430, 70, 80); $g.FillEllipse([System.Drawing.Brushes]::White, 605, 430, 70, 80)',
+    '  $g.FillEllipse($dark, 475, 462, 18, 22); $g.FillEllipse($dark, 635, 462, 18, 22); $g.FillEllipse($warm, 540, 520, 48, 30)',
+    '  $g.DrawEllipse($ink, 360, 350, 400, 280); $g.DrawEllipse($thin, 440, 160, 95, 260); $g.DrawEllipse($thin, 585, 160, 95, 260)',
+    '} elseif ($lower -match "robot|android") {',
+    '  $g.FillRectangle($soft, 405, 245, 290, 255); $g.DrawRectangle($ink, 405, 245, 290, 255); $g.FillEllipse($accent, 465, 310, 55, 55); $g.FillEllipse($accent, 580, 310, 55, 55); $g.FillRectangle($warm, 500, 405, 100, 35); $g.DrawLine($thin, 550, 245, 550, 160); $g.FillEllipse($warm, 535, 132, 30, 30)',
+    '} elseif ($lower -match "car|vehicle|truck") {',
+    '  $g.FillRectangle($accent, 300, 380, 500, 135); $g.FillPolygon($soft, @([System.Drawing.Point]::new(405,380),[System.Drawing.Point]::new(485,300),[System.Drawing.Point]::new(650,300),[System.Drawing.Point]::new(730,380))); $g.DrawRectangle($ink, 300, 380, 500, 135); $g.FillEllipse($dark, 380, 485, 90, 90); $g.FillEllipse($dark, 635, 485, 90, 90)',
+    '} elseif ($lower -match "flower|rose|tulip") {',
+    '  $g.DrawLine((New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(60,130,85), 10)), 550, 610, 550, 380); for($i=0;$i -lt 10;$i++){ $ang=$i*36; $x=550+[math]::Cos($ang*[math]::PI/180)*80; $y=350+[math]::Sin($ang*[math]::PI/180)*55; $g.FillEllipse($accent, $x-45, $y-30, 90, 60) }; $g.FillEllipse($warm, 510, 315, 80, 80)',
+    '} else {',
+    '  $g.FillEllipse($soft, 360, 230, 380, 330); $g.DrawEllipse($ink, 360, 230, 380, 330); $g.FillEllipse($accent, 455, 330, 70, 70); $g.FillEllipse($accent, 585, 330, 70, 70); $g.DrawArc($thin, 485, 410, 130, 70, 15, 150); $g.DrawString("original visual draft", $font, $dark, 470, 585)',
+    '}',
+    '$bmp.Save($OutFile, [System.Drawing.Imaging.ImageFormat]::Png)',
+    '$g.Dispose(); $bmp.Dispose(); $ink.Dispose(); $thin.Dispose(); $accent.Dispose(); $soft.Dispose(); $warm.Dispose(); $dark.Dispose(); $fontTitle.Dispose(); $font.Dispose(); $fontSmall.Dispose()'
+  ].join(os.EOL);
+  writeJson(notesFile, { subject, query, exact_character_request: exactCharacter, copyright_note: exactCharacter ? 'Created as an original cartoon rabbit from high-level researched traits, not an exact character copy.' : '', traits, research, created_at: new Date().toISOString() });
+  fs.writeFileSync(scriptFile, script, 'utf8');
+  const drawn = await runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, file, safeSubject, safeTitle, safeTraits, safeSource], 25000);
+  try { fs.unlinkSync(scriptFile); } catch {}
+  if (!drawn.ok || !fs.existsSync(file)) throw new Error(drawn.stderr || drawn.stdout || 'Visual creation failed.');
+  const opened = await startProcessDetached('mspaint.exe', [file]);
+  return { ...opened, app: 'Paint', file, notes_file: notesFile, bytes: fs.statSync(file).size, subject, query, traits, research_url: research.url, opened_reference: research.opened || null, safe_transform: exactCharacter };
+}
+
 function sandboxFilePath(relpath) {
   const rel = String(relpath || '').trim();
   if (!rel) throw new Error('relpath is required.');
@@ -682,6 +794,9 @@ async function callLocalTool(name, args = {}) {
     const board = readMissionBoard();
     return { ok: true, tool: toolName, result: { ...board, summary: missionSummary(board) } };
   }
+  if (isTool('abuz8_mission_auto_probe', 'mission_auto_probe', 'auto_probe')) {
+    return { ok: true, tool: toolName, result: await autoProbeDevice() };
+  }
   if (isTool('abuz8_mission_task_create', 'mission_task_create')) {
     const task = upsertMissionTask(body);
     return { ok: true, tool: toolName, result: { task, board: readMissionBoard() } };
@@ -699,11 +814,14 @@ async function callLocalTool(name, args = {}) {
   if (isTool('open_app')) {
     return { ok: true, tool: toolName, result: await actionOpenApp(body) };
   }
+  if (isTool('create_visual_in_paint', 'research_create_visual', 'paint_visual')) {
+    return { ok: true, tool: toolName, result: await actionCreateVisualInPaint(body) };
+  }
   if (isTool('draw_monkey_in_paint', 'paint_monkey', 'draw_monkey')) {
     return { ok: true, tool: toolName, result: await actionDrawMonkeyInPaint(body) };
   }
   if (isTool('draw_cartoon_rabbit_in_paint', 'paint_rabbit', 'draw_rabbit')) {
-    return { ok: true, tool: toolName, result: await actionDrawCartoonRabbitInPaint(body) };
+    return { ok: true, tool: toolName, result: await actionCreateVisualInPaint({ ...body, subject: body.subject || body.caption || 'cartoon rabbit', open_browser: true }) };
   }
   if (isTool('screenshot')) {
     return { ok: true, tool: toolName, result: await actionScreenshot(body) };
@@ -1286,19 +1404,21 @@ function agentToolInstructions() {
     'If no tool is needed, return normal helpful text.',
     'Available tools:',
     '- abuz8_device_probe {}',
+    '- abuz8_mission_auto_probe {}',
     '- abuz8_memory_write {"content":"..."}',
     '- abuz8_mission_board {}',
     '- abuz8_mission_task_create {"title":"...","column":"ready","priority":"medium","details":"..."}',
     '- model_download_hf {"repo":"org/repo","file":"model.gguf","allow_network_download":true}',
     '- cloud_brain_register {"provider":"openai|anthropic|custom","endpoint":"https://...","model":"...","api_key_env":"ENV_NAME","allow_cloud_brain":true}',
     '- web_search {"query":"current topic"}',
+    '- create_visual_in_paint {"subject":"thing to create","prompt":"original user request","open_browser":true}',
     '- open_url {"url":"https://example.com"}',
     '- open_app {"name":"notepad|mspaint|chrome|edge|browser|calc|explorer"}',
-    '- draw_cartoon_rabbit_in_paint {"caption":"optional caption"}',
+    '- draw_cartoon_rabbit_in_paint is legacy; prefer create_visual_in_paint for visual creation.',
     '- screenshot {}',
     '- file_write {"relpath":"notes/example.txt","content":"..."}',
     '- shell_run {"cmd":"whoami|hostname|dir"}',
-    'Action tools require the user to enable Allow actions for this session. Never invent unsupported tools. For protected characters, create an original safe drawing instead of claiming to copy the exact character.',
+    'Action tools require the user to enable Allow actions for this session. Never invent unsupported tools. For creation requests, research first, then create from current reference notes. For protected characters, create an original safe drawing instead of claiming to copy the exact character.',
     ''
   ].join('\n');
 }
@@ -1412,17 +1532,20 @@ function inferConsumerToolCall(prompt) {
   const msg = String(prompt || '').trim();
   const lower = msg.toLowerCase();
   if (!msg) return null;
+  if (/\b(mission control|mission)\b.*\b(auto ?probe|parse|scan|profile|current device|this device)\b/.test(lower)) {
+    return { tool: 'abuz8_mission_auto_probe', args: {} };
+  }
   if (lower === '/probe' || /\b(probe|scan|check)\b.*\b(device|computer|system|machine|hardware)\b/.test(lower)) {
     return { tool: 'abuz8_device_probe', args: {} };
   }
   if (/\b(open|launch|start)\b.*\b(chrome|google chrome)\b/.test(lower)) return { tool: 'open_app', args: { name: 'chrome' } };
   if (/\b(open|launch|start)\b.*\b(edge|microsoft edge)\b/.test(lower)) return { tool: 'open_app', args: { name: 'edge' } };
   if (/\b(open|launch|start)\b.*\b(browser|web browser)\b/.test(lower)) return { tool: 'open_app', args: { name: 'browser' } };
-  if (/\b(draw|paint|create)\b.*\bmonkey\b/.test(lower) && /\b(paint|mspaint|microsoft paint)\b/.test(lower)) {
-    return { tool: 'draw_monkey_in_paint', args: { caption: 'ABUZ8 OS local desktop action proof' } };
+  if (/\b(open|launch|start)\b.*\b(paint|mspaint)\b/.test(lower) && !/\b(draw|create|make|generate|design|sketch|illustrate|picture|image|drawing|art)\b/i.test(msg)) {
+    return { tool: 'open_app', args: { name: 'mspaint' } };
   }
-  if (/\b(draw|paint|create)\b.*\b(bugs bunny|bunny|rabbit|cartoon rabbit)\b/.test(lower) && /\b(paint|mspaint|microsoft paint)\b/.test(lower)) {
-    return { tool: 'draw_cartoon_rabbit_in_paint', args: { caption: 'Original cartoon rabbit - ABUZ8 OS' } };
+  if (/\b(draw|create|make|generate|design|sketch|illustrate)\b/i.test(msg) && /\b(paint|mspaint|microsoft paint|picture|image|drawing|art)\b/i.test(msg)) {
+    return { tool: 'create_visual_in_paint', args: { subject: extractCreativeSubject(msg), prompt: msg, open_browser: true } };
   }
   if (/\b(open|launch|start)\b.*\b(paint|mspaint)\b/.test(lower)) return { tool: 'open_app', args: { name: 'mspaint' } };
   if (/\b(open|launch|start)\b.*\bnotepad\b/.test(lower)) return { tool: 'open_app', args: { name: 'notepad' } };
@@ -1444,8 +1567,11 @@ function inferConsumerToolCall(prompt) {
 function summarizeToolResult(tool, result) {
   const payload = result?.result ?? result;
   if (tool === 'open_app') return `Done. Opened ${payload.app || payload.file || 'the requested app'}.`;
+  if (tool === 'create_visual_in_paint' || tool === 'draw_cartoon_rabbit_in_paint') {
+    const safeNote = payload.safe_transform ? '\n\nNote: I made an original safe version from high-level researched traits, not an exact copyrighted character copy.' : '';
+    return `Done. I researched "${payload.subject || 'the subject'}", used these traits: ${(payload.traits || []).join(', ')}, created the image, and opened it in Paint.\n\nImage: ${payload.file}\nResearch notes: ${payload.notes_file}${payload.research_url ? `\nReference/search: ${payload.research_url}` : ''}${safeNote}`;
+  }
   if (tool === 'draw_monkey_in_paint') return `Done. Drew a monkey image and opened it in Paint: ${payload.file}.`;
-  if (tool === 'draw_cartoon_rabbit_in_paint') return `Done. Drew an original cartoon rabbit and opened it in Paint: ${payload.file}.`;
   if (tool === 'open_url') return `Done. Opened ${payload.url || 'the requested URL'} in the default browser.`;
   if (tool === 'web_search') {
     const lines = [];
@@ -1461,6 +1587,9 @@ function summarizeToolResult(tool, result) {
   if (tool === 'shell_run') return `Done.\n\n${String(payload.stdout || '').trim()}`;
   if (tool === 'abuz8_device_probe') {
     return `Device probe complete: ${payload.system?.hostname || os.hostname()} · ${payload.cpu?.name || 'CPU'} · ${payload.memory?.total_gb || '?'}GB RAM · tier ${payload.tier || 'unknown'}.`;
+  }
+  if (tool === 'abuz8_mission_auto_probe') {
+    return `Mission Control auto-probe saved for this device.\n\nProfile: ${payload.file}\nDevice: ${payload.device?.system?.hostname || os.hostname()} · ${payload.device?.cpu?.name || 'CPU'} · ${payload.device?.memory?.total_gb || '?'}GB RAM · tier ${payload.device?.tier || 'unknown'}\n${payload.mission_summary || ''}`.trim();
   }
   if (tool === 'abuz8_mission_board') return `Mission board loaded. ${payload.summary || ''}`.trim();
   return `Tool ${tool} completed.\n\n${JSON.stringify(payload, null, 2)}`;
@@ -1561,8 +1690,8 @@ function sendTui(res) {
 </head>
 <body>
   <header><span class="dot"></span><h1>ABUZ8 LOCAL TUI - 127.0.0.1:${PORT}</h1></header>
-  <main id="log"><span class="sys">Portable Core online. Native LFM brain remains primary. Type a prompt or action command.</span></main>
-  <form id="f"><input id="q" autocomplete="off" placeholder="Ask, /probe, open Paint, draw a monkey in Paint..."><button>Send</button></form>
+  <main id="log"><span class="sys">ABUZ8 OS Agent online. Ask normally; creation requests research first, then act with permission.</span></main>
+  <form id="f"><input id="q" autocomplete="off" placeholder="Ask, /probe, mission auto probe, research and create an image in Paint..."><button>Send</button></form>
   <script>
     const log=document.getElementById('log'), q=document.getElementById('q'), f=document.getElementById('f');
     function line(cls, text){ const d=document.createElement('div'); d.className=cls; d.textContent='\\n'+text; log.appendChild(d); log.scrollTop=log.scrollHeight; }
@@ -1767,6 +1896,52 @@ async function machineProbe() {
   };
 }
 
+async function autoProbeDevice() {
+  const probe = await machineProbe();
+  const profile = {
+    ok: true,
+    probed_at: new Date().toISOString(),
+    host_fingerprint: crypto.createHash('sha256')
+      .update([probe.system?.hostname, probe.system?.os_release, probe.cpu?.name, probe.memory?.total_gb].join('|'))
+      .digest('hex')
+      .slice(0, 16),
+    device: {
+      tier: probe.tier,
+      headline: probe.headline,
+      system: probe.system,
+      cpu: probe.cpu,
+      memory: probe.memory,
+      storage: probe.storage,
+      gpus: probe.gpus,
+      connectors: probe.connectors
+    },
+    capabilities: probe.capabilities,
+    recommended: probe.recommended,
+    data_root: dataRoot
+  };
+  const profileFile = path.join(dataRoot, 'mission', 'device-profile.json');
+  writeJson(profileFile, profile);
+  try {
+    upsertMissionTask({
+      id: 'auto-probe-current-device',
+      title: `Auto-probe ${probe.system?.hostname || 'current device'}`,
+      column: 'ready',
+      priority: 'medium',
+      owner: 'ABUZ8 OS Agent',
+      details: `${probe.headline} ${probe.cpu?.name || 'CPU'} · ${probe.memory?.total_gb || '?'}GB RAM · data root ${dataRoot}`
+    });
+  } catch {}
+  appendJsonl(memoryFile(), {
+    id: `device-probe-${Date.now().toString(36)}`,
+    type: 'device_probe',
+    content: `Current device auto-probed: ${probe.headline} ${probe.cpu?.name || 'CPU'} · ${probe.memory?.total_gb || '?'}GB RAM.`,
+    hostname: probe.system?.hostname,
+    tier: probe.tier,
+    timestamp: new Date().toISOString()
+  });
+  return { ...profile, file: profileFile, mission_summary: missionSummary(readMissionBoard()) };
+}
+
 async function route(req, res) {
   const { pathname, searchParams } = splitPath(req.url);
   if (req.method === 'OPTIONS') return text(res, 204, '');
@@ -1853,6 +2028,9 @@ async function route(req, res) {
   }
   if (pathname === '/api/device/probe' || pathname === '/api/capabilities/probe') {
     return json(res, 200, await machineProbe());
+  }
+  if (pathname === '/api/device/auto-probe' || pathname === '/api/mission/auto-probe') {
+    return json(res, 200, await autoProbeDevice());
   }
   if (pathname === '/api/mind/status') {
     const board = readMissionBoard();
@@ -2248,6 +2426,11 @@ async function start(options = {}) {
   });
   if (server) logFn(`portable core listening on http://127.0.0.1:${PORT}`);
   logFn(`data root: ${dataRoot}`);
+  setTimeout(() => {
+    autoProbeDevice()
+      .then((p) => logFn(`device auto-probe saved: ${p.file}`))
+      .catch((e) => logFn(`device auto-probe skipped: ${e.message}`));
+  }, 1200);
   return { port: PORT, dataRoot };
 }
 

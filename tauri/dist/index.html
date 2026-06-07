@@ -1012,7 +1012,7 @@ body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#ff
     <div class="onb-step" data-step="2">
       <div class="onb-eyebrow">Step 2 · Capabilities</div>
       <div class="onb-title">This machine, specifically</div>
-      <div class="onb-sub">ABUZ8 OS probes the device it is running on and shows what is live, what is fallback, and what needs a connector.</div>
+      <div class="onb-sub">ABUZ8 OS auto-probes the device it is running on, builds a local Mission Control profile, and shows what is live, what is fallback, and what needs a connector.</div>
       <div id="onb-device-probe"><div style="font-size:12px;color:var(--text3)">Scanning this device…</div></div>
     </div>
     <div class="onb-step" data-step="3">
@@ -1031,12 +1031,13 @@ body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#ff
       <button class="onb-try" onclick="toggleActionConsent().then(()=>onbTry('Open Chrome'))"><span class="tt">DESKTOP</span>Open Chrome</button>
       <button class="onb-try" onclick="onbTry('Search the web for latest AI agent news')"><span class="tt">WEB</span>Search the web</button>
       <button class="onb-try" onclick="onbTry('/probe')"><span class="tt">SYSTEM</span>Probe this device</button>
+      <button class="onb-try" onclick="onbTry('Mission Control auto probe this current device')"><span class="tt">MISSION</span>Auto-profile this device</button>
     </div>
     <div class="onb-step" data-step="5">
       <div class="onb-eyebrow">You're set</div>
       <div class="onb-title">Ready ✦</div>
       <div class="onb-sub">Type in the command bar or chat. Re-open this guide with the <b>?</b> in the topbar.</div>
-      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>Plain language</b><p>“Open Chrome.” “Search the web.” “Remember my supplier list.” “Probe this device.”</p></div></div>
+      <div class="onb-feat"><div class="ico">💬</div><div class="ft"><b>Plain language</b><p>“Open Chrome.” “Search the web.” “Research what this looks like and create it in Paint.” “Probe this device.”</p></div></div>
       <div class="onb-feat"><div class="ico">👁️</div><div class="ft"><b>Permissioned control</b><p>Desktop actions require Allow Actions each session. Chat and memory work without that switch.</p></div></div>
       <div class="onb-feat"><div class="ico">⚡</div><div class="ft"><b>Extend it</b><p>Use Migrate to import MCP connectors, add local GGUF brains, or register cloud brains with your own keys.</p></div></div>
     </div>
@@ -1307,7 +1308,7 @@ body.simple-mode .live-chip{border:1px solid rgba(45,185,120,.22);background:#ff
             <div class="msg ai">
               <div class="m-av">Q</div>
               <div>
-                <div class="m-body">ABUZ8 OS Agent is online on this computer. Ask normally, or say things like “open Chrome,” “search the web,” “remember this,” or “probe this device.”</div>
+                <div class="m-body">ABUZ8 OS Agent is online on this computer. Ask normally, or say things like “open Chrome,” “search the web,” “research what this looks like and create it in Paint,” or “mission auto probe this device.”</div>
                 <div class="m-meta">agent · local core :8900</div>
               </div>
             </div>
