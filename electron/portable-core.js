@@ -19,6 +19,23 @@ let logFn = (m) => console.log('[portable-core] ' + m);
 const jobs = [];
 let lfmProcess = null;
 let lfmStarting = false;
+
+// ===== Jarvis multi-brain pool (Step 1) =====
+// Three brains run in parallel on separate ports. A lightweight router picks
+// which tier answers each request. Backward compatible with single-brain path.
+const BRAIN_POOL_PORTS = {
+  lite: 8903,
+  standard: 8904,
+  pro: 8902 // same port as legacy single-brain; pool will avoid double-spawn if lfmProcess holds this port
+};
+const BRAIN_POOL_FILES = {
+  lite: 'LFM2.5-350M-Q4_K_M.gguf',
+  standard: 'LFM2-1.2B-Tool-Q4_K_M.gguf',
+  pro: 'LFM2-2.6B-Exp-Q4_K_M.gguf'
+};
+let brainPool = []; // [{tier, port, file, process, alive, lastError}]
+let brainPoolStarting = false;
+let brainPoolEnabled = false; // becomes true after startBrainPool() succeeds for >=1 tier
 let lastLfmError = '';
 let activeBrain = null;
 let hostExecutable = null;
@@ -1394,6 +1411,178 @@ async function ensureEmbeddedBrain() {
   }
 }
 
+// ===== Jarvis multi-brain pool helpers (Step 1) =====
+
+function brainPoolModelPath(tier) {
+  const files = brainRuntimeFiles();
+  const candidates = [
+    path.join(files.dir, BRAIN_POOL_FILES[tier]),
+    path.join(__dirname, '.brain-shelf', BRAIN_POOL_FILES[tier])
+  ];
+  return candidates.find((p) => exists(p)) || null;
+}
+
+async function probeBrainAlive(port) {
+  try {
+    await httpJson('GET', port, '/health', null, 1500);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function startBrainTier(tier) {
+  const port = BRAIN_POOL_PORTS[tier];
+  const file = BRAIN_POOL_FILES[tier];
+  const model = brainPoolModelPath(tier);
+  const files = brainRuntimeFiles();
+  if (!model || !exists(files.server)) {
+    return { tier, port, file, process: null, alive: false, lastError: 'model or runtime missing' };
+  }
+  // If legacy single-brain holds this port with the same file, mark it as part of the pool instead of double-spawning
+  if (lfmProcess && BRAIN_POOL_PORTS[tier] === LFM_PORT) {
+    const aliveLegacy = await probeBrainAlive(port);
+    if (aliveLegacy) {
+      return { tier, port, file, process: lfmProcess, alive: true, lastError: '', legacy: true };
+    }
+  }
+  // EBUSY guard: if file is currently mmap'd by selected brain at LFM_PORT, skip this tier
+  if (lfmProcess && activeBrain && String(activeBrain.model_file || '').toLowerCase() === file.toLowerCase()) {
+    logFn(`[brain-pool] tier=${tier} skipped (GGUF already held by selected brain at port ${LFM_PORT})`);
+    return { tier, port, file, process: null, alive: false, lastError: 'GGUF held by selected brain', legacy: true };
+  }
+  const args = [
+    '-m', model,
+    '--host', '127.0.0.1',
+    '--port', String(port),
+    '-c', '2048',
+    '-ngl', '0',
+    '--threads', String(Math.max(2, Math.min(6, os.cpus().length || 4)))
+  ];
+  try {
+    logFn(`[brain-pool] spawn ${tier} port=${port} file=${file}`);
+    const proc = spawn(files.server, args, {
+      cwd: files.dir,
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      shell: false
+    });
+    const entry = { tier, port, file, process: proc, alive: false, lastError: '' };
+    proc.on('error', (e) => { entry.lastError = e.message; entry.alive = false; logFn(`[brain-pool] ${tier} error: ${e.message}`); });
+    proc.on('exit', (code, sig) => { entry.lastError = `exit code=${code} sig=${sig}`; entry.alive = false; logFn(`[brain-pool] ${tier} exit code=${code}`); });
+    if (proc.stderr) {
+      proc.stderr.on('data', (d) => { const s = String(d).trim(); if (s) entry.lastError = s.slice(-300); });
+    }
+    return entry;
+  } catch (e) {
+    logFn(`[brain-pool] spawn ${tier} FAIL: ${e.message}`);
+    return { tier, port, file, process: null, alive: false, lastError: e.message };
+  }
+}
+
+async function startBrainPool(strategy = 'auto') {
+  if (brainPoolStarting) return brainPool;
+  brainPoolStarting = true;
+  try {
+    // Hardware-aware tier selection
+    const ramGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+    const cpuCount = os.cpus().length || 1;
+    let tiers = ['lite', 'standard', 'pro'];
+    if (strategy === 'lite-only' || ramGb < 8) {
+      tiers = ['lite'];
+    } else if (strategy === 'lazy' || ramGb < 16) {
+      tiers = ['lite']; // start with lite; Standard/Pro can be added on demand
+    } else if (cpuCount < 4) {
+      tiers = ['lite'];
+    }
+    logFn(`[brain-pool] starting tiers=[${tiers.join(',')}] ram=${ramGb}GB cpu=${cpuCount}`);
+    const entries = [];
+    for (const tier of tiers) {
+      const e = await startBrainTier(tier);
+      entries.push(e);
+    }
+    brainPool = entries;
+    brainPoolEnabled = entries.some((e) => e.process || e.alive);
+    return brainPool;
+  } finally {
+    brainPoolStarting = false;
+  }
+}
+
+async function refreshBrainPoolAlive() {
+  for (const entry of brainPool) {
+    entry.alive = await probeBrainAlive(entry.port);
+  }
+  return brainPool;
+}
+
+function brainPoolStatus() {
+  return brainPool.map((e) => ({
+    tier: e.tier,
+    port: e.port,
+    file: e.file,
+    alive: Boolean(e.alive),
+    lastError: e.lastError || ''
+  }));
+}
+
+function classifyBrainTier(text, hints = {}) {
+  if (hints.tier && ['lite', 'standard', 'pro'].includes(String(hints.tier).toLowerCase())) {
+    return String(hints.tier).toLowerCase();
+  }
+  const t = String(text || '').trim();
+  const lower = t.toLowerCase();
+  // Tool / function call requests → Standard (1.2B Tool is the tool specialist)
+  if (/\b(tool|function|call|invoke|execute|run|api|json|schema)\b/.test(lower)) return 'standard';
+  if (lower.startsWith('/tool') || lower.startsWith('/call')) return 'standard';
+  // Deep / creative / long-form → Pro
+  if (/\b(explain|write|draft|plan|design|strategy|analyze|summarize|compare|outline|story|email|report)\b/.test(lower)) return 'pro';
+  if (t.length > 240) return 'pro';
+  // Default → Lite (fast classifier, short replies)
+  return 'lite';
+}
+
+async function callBrainTier(tier, prompt, opts = {}) {
+  const entry = brainPool.find((e) => e.tier === tier);
+  if (!entry) throw new Error(`brain tier '${tier}' not in pool`);
+  const port = entry.port;
+  const body = {
+    prompt,
+    n_predict: opts.n_predict || (tier === 'pro' ? 400 : tier === 'standard' ? 280 : 160),
+    temperature: opts.temperature ?? (tier === 'pro' ? 0.4 : 0.3),
+    stop: opts.stop || ['User:', '\n\nUser:']
+  };
+  const out = await httpJson('POST', port, '/completion', body, opts.timeoutMs || 60000);
+  const text = out.content || out.response || out.text || '';
+  return { tier, port, response: cleanAgentText(text) };
+}
+
+async function routeRequest(text, hints = {}) {
+  // Ensure pool is alive
+  if (!brainPoolEnabled) await startBrainPool();
+  await refreshBrainPoolAlive();
+  let tier = classifyBrainTier(text, hints);
+  const aliveTiers = brainPool.filter((e) => e.alive).map((e) => e.tier);
+  if (!aliveTiers.length) {
+    // Fall back to legacy single-brain path
+    const legacy = await embeddedReply(text, { agentic: false });
+    return { ok: true, via: 'legacy-single-brain', response: legacy || '' };
+  }
+  if (!aliveTiers.includes(tier)) {
+    // Prefer next-best alive tier
+    const order = ['lite', 'standard', 'pro'];
+    tier = order.find((o) => aliveTiers.includes(o)) || aliveTiers[0];
+  }
+  const result = await callBrainTier(tier, text, hints);
+  // Confidence escalation: if Lite reply is empty or very short, try Standard
+  if (tier === 'lite' && (!result.response || result.response.length < 8) && aliveTiers.includes('standard')) {
+    const escalated = await callBrainTier('standard', text, hints);
+    if (escalated.response) return { ok: true, via: `lfm2-1.2b-tool (escalated from lite)`, response: escalated.response, tier: 'standard' };
+  }
+  const brainName = tier === 'lite' ? 'lfm2.5-350m-lite' : tier === 'standard' ? 'lfm2-1.2b-tool' : 'lfm2-2.6b-pro';
+  return { ok: true, via: brainName, response: result.response, tier };
+}
+
 function agentToolInstructions() {
   return [
     'You are ABUZ8 OS Agent, a consumer desktop agent running on this device.',
@@ -2081,6 +2270,43 @@ async function route(req, res) {
     ];
     return json(res, 200, { ok: true, brains, local: brains, cloud: [] });
   }
+  // Jarvis multi-brain endpoints
+  if (pathname === '/api/brains/pool') {
+    await refreshBrainPoolAlive();
+    return json(res, 200, {
+      ok: true,
+      enabled: brainPoolEnabled,
+      pool: brainPoolStatus(),
+      ports: BRAIN_POOL_PORTS,
+      files: BRAIN_POOL_FILES
+    });
+  }
+  if (pathname === '/api/brains/pool/start') {
+    const body = await getBody(req).catch(() => ({}));
+    const strategy = body.strategy || 'auto';
+    const pool = await startBrainPool(strategy);
+    return json(res, 200, { ok: true, started: pool.length, pool: brainPoolStatus(), strategy });
+  }
+  if (pathname === '/api/route') {
+    const body = await getBody(req);
+    const text = body.content || body.message || body.prompt || body.raw || '';
+    if (!text) return json(res, 400, { ok: false, error: 'missing content' });
+    try {
+      const r = await routeRequest(text, { tier: body.tier, n_predict: body.n_predict, temperature: body.temperature });
+      appendJsonl(memoryFile(), {
+        id: crypto.randomUUID(),
+        type: 'route',
+        content: text,
+        response: r.response,
+        via: r.via,
+        tier: r.tier,
+        timestamp: new Date().toISOString()
+      });
+      return json(res, 200, r);
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
+  }
   if (pathname === '/api/brains/select') {
     const body = await getBody(req);
     try {
@@ -2497,6 +2723,15 @@ async function start(options = {}) {
       .then((p) => logFn(`device auto-probe saved: ${p.file}`))
       .catch((e) => logFn(`device auto-probe skipped: ${e.message}`));
   }, 1200);
+  // Jarvis multi-brain pool: start in background, do not block server boot
+  setTimeout(() => {
+    startBrainPool().then((pool) => {
+      const alive = pool.filter((e) => e.process || e.alive).length;
+      logFn(`[brain-pool] started ${alive}/${pool.length} brains: ${pool.map((e) => e.tier).join(',')}`);
+    }).catch((e) => {
+      logFn(`[brain-pool] start failed: ${e.message}`);
+    });
+  }, 1500);
   return { port: PORT, dataRoot };
 }
 
@@ -2507,6 +2742,14 @@ function stop() {
     try { lfmProcess.kill(); } catch {}
     lfmProcess = null;
   }
+  // Stop pool brains
+  for (const entry of brainPool) {
+    if (entry.process && !entry.legacy) {
+      try { entry.process.kill(); } catch {}
+    }
+  }
+  brainPool = [];
+  brainPoolEnabled = false;
 }
 
 module.exports = { start, stop, PORT };
