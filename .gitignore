@@ -41,3 +41,6 @@ desktop.ini
 *.tmp
 *.bak
 *.bak*
+
+electron/out-jarvis-all/
+electron/out-jarvis-portable/
