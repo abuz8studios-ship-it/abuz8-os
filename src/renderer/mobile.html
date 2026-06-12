@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#05100c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ABUZ8">
+<link rel="manifest" href="/manifest.json">
+<title>ABUZ8 — Mobile</title>
+<style>
+  :root{ --bg:#05100c; --bg2:#0a1a13; --card:#0e231a; --line:#1c3a2c; --txt:#dffaf0; --txt2:#8fc7b0; --txt3:#5c8b76; --acc:#39d98a; --acc2:#39d9d9; }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+  body{display:flex;flex-direction:column;overscroll-behavior:none}
+  header{display:flex;align-items:center;gap:9px;padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;background:linear-gradient(180deg,var(--bg2),transparent);position:sticky;top:0;z-index:5}
+  .logo{width:30px;height:30px;border-radius:9px;background:radial-gradient(circle at 50% 35%,#9fffe0,#39d98a 60%,#062018);display:grid;place-items:center;font-weight:800;color:#05140d}
+  header b{font-size:16px;letter-spacing:.3px}
+  header .dot{width:8px;height:8px;border-radius:50%;background:var(--txt3);margin-left:auto}
+  header .dot.on{background:var(--acc);box-shadow:0 0 8px var(--acc)}
+  main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .view{display:none;padding:8px 13px 96px}
+  .view.on{display:block}
+  .msg{max-width:86%;padding:10px 13px;border-radius:15px;margin:7px 0;font-size:15px;line-height:1.42;white-space:pre-wrap;word-wrap:break-word}
+  .msg.u{background:var(--acc);color:#04130c;margin-left:auto;border-bottom-right-radius:5px}
+  .msg.a{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:5px}
+  .msg .who{font-size:10px;opacity:.6;margin-bottom:2px}
+  .empty{color:var(--txt3);text-align:center;padding:40px 20px;font-size:14px;line-height:1.5}
+  .composer{position:fixed;left:0;right:0;bottom:54px;display:flex;gap:8px;align-items:flex-end;padding:9px 12px;background:linear-gradient(0deg,var(--bg) 75%,transparent);z-index:6}
+  .composer textarea{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:20px;padding:11px 15px;font-size:16px;resize:none;max-height:120px;outline:none;font-family:inherit}
+  .composer button{flex:none;width:46px;height:46px;border-radius:50%;border:none;background:var(--acc);color:#05140d;font-size:20px;font-weight:800}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:15px;margin:10px 0}
+  .big-btn{width:100%;padding:18px;border:none;border-radius:16px;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04130c;font-size:17px;font-weight:800;margin:8px 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .qa{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 12px;text-align:center;font-size:14px;font-weight:600;color:var(--txt)}
+  .qa .ico{font-size:24px;display:block;margin-bottom:6px}
+  h3{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--txt3);margin:16px 2px 6px}
+  .act{font-size:13px;padding:8px 0;border-bottom:1px solid var(--line);color:var(--txt2)}
+  .act b{color:var(--txt)}
+  .muted{color:var(--txt3);font-size:12px;line-height:1.5}
+  nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--bg2);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:7}
+  nav a{flex:1;text-align:center;padding:8px 0 7px;color:var(--txt3);font-size:10.5px;text-decoration:none}
+  nav a .ico{font-size:21px;display:block;margin-bottom:2px}
+  nav a.on{color:var(--acc)}
+  .toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%);background:#0c2419;border:1px solid var(--line);color:var(--txt);padding:10px 16px;border-radius:22px;font-size:13px;opacity:0;transition:.25s;z-index:20;pointer-events:none;max-width:90%}
+  .toast.show{opacity:1}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--txt3);border-top-color:var(--acc);border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header><div class="logo">A</div><b>ABUZ8</b><span class="dot" id="dot"></span></header>
+<main>
+  <section class="view on" id="v-chat">
+    <div id="thread"><div class="empty">Talk to ABUZ8 running on your computer.<br>Try &ldquo;what&rsquo;s the weather&rdquo; or &ldquo;open YouTube&rdquo;.</div></div>
+  </section>
+  <section class="view" id="v-brief">
+    <button class="big-btn" id="brief-btn">&#128075; Brief me</button>
+    <div class="card" id="brief-out"><span class="muted">Your live briefing &mdash; time, weather, missions, and (if connected) calendar &amp; inbox &mdash; spoken aloud.</span></div>
+    <h3>Quick actions</h3>
+    <div class="grid">
+      <div class="qa" onclick="quick('what is the weather today')"><span class="ico">&#9925;</span>Weather</div>
+      <div class="qa" onclick="quick('what time is it')"><span class="ico">&#128336;</span>Time</div>
+      <div class="qa" onclick="go('chat')"><span class="ico">&#128172;</span>Ask anything</div>
+      <div class="qa" onclick="speakTest()"><span class="ico">&#128266;</span>Test voice</div>
+    </div>
+  </section>
+  <section class="view" id="v-act">
+    <h3>Live activity <span id="act-spin"></span></h3>
+    <div id="act-list"><div class="muted">Loading&hellip;</div></div>
+  </section>
+  <section class="view" id="v-more">
+    <div class="card"><div style="font-weight:700;margin-bottom:6px">Connected to your computer</div><div class="muted" id="status-line">Checking&hellip;</div></div>
+    <h3>Spoken replies</h3>
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between" onclick="toggleSpeak()">
+      <span>&#128266; Read answers aloud</span><span id="speak-pill" style="padding:4px 12px;border-radius:20px;background:#0c2419;color:var(--txt3);font-size:12px">off</span>
+    </div>
+    <h3>About</h3>
+    <div class="card muted" style="font-size:12.5px">This is the ABUZ8 mobile companion &mdash; it controls the sovereign agent running on your PC. The brain, vision, and OS-control run on your computer; your phone is the remote. Add it to your home screen to use it like an app.<br><br><b style="color:var(--txt2)">Note:</b> voice <i>input</i> needs a secure (HTTPS) link &mdash; text and spoken replies work over Wi-Fi as-is.</div>
+  </section>
+</main>
+<div class="composer" id="composer">
+  <textarea id="inp" rows="1" placeholder="Message ABUZ8&hellip;" enterkeyhint="send"></textarea>
+  <button id="send">&#8593;</button>
+</div>
+<nav id="tabs">
+  <a data-go="chat" class="on"><span class="ico">&#128172;</span>Chat</a>
+  <a data-go="brief"><span class="ico">&#128075;</span>Brief</a>
+  <a data-go="act"><span class="ico">&#9889;</span>Activity</a>
+  <a data-go="more"><span class="ico">&#9881;</span>More</a>
+</nav>
+<div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const url=new URL(location.href); const KEY=url.searchParams.get('key')||sessionStorage.getItem('abuz8_key')||'';
+if(KEY) sessionStorage.setItem('abuz8_key',KEY);
+let speak=sessionStorage.getItem('m_speak')==='1';
+function hdr(h){ h=h||{}; if(KEY) h['x-abuz8-key']=KEY; return h; }
+async function api(p,opts){ opts=opts||{}; opts.headers=hdr(opts.headers); const r=await fetch(p,opts); return r.json(); }
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2400); }
+function esc(s){ return String(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function go(v){ document.querySelectorAll('.view').forEach(x=>x.classList.remove('on')); $('#v-'+v).classList.add('on');
+  document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.dataset.go===v));
+  $('#composer').style.display=v==='chat'?'flex':'none';
+  if(v==='act') loadActivity(); if(v==='more') loadStatus(); }
+document.querySelectorAll('nav a').forEach(a=>a.onclick=()=>go(a.dataset.go));
+async function ping(){ try{ const r=await fetch('/health'); $('#dot').classList.toggle('on',r.ok); }catch{ $('#dot').classList.remove('on'); } }
+ping(); setInterval(ping,8000);
+const thread=[];
+function render(){ const t=$('#thread'); if(!thread.length)return; t.innerHTML=thread.map(m=>`<div class="msg ${m.role==='u'?'u':'a'}"><div class="who">${m.role==='u'?'You':esc(m.brain||'ABUZ8')}</div>${esc(m.text)}</div>`).join(''); window.scrollTo(0,document.body.scrollHeight); }
+async function send(text){ text=(text||$('#inp').value).trim(); if(!text)return; $('#inp').value=''; $('#inp').style.height='auto';
+  thread.push({role:'u',text}); thread.push({role:'a',text:'…',brain:'thinking'}); render();
+  try{ const j=await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:text})});
+    thread.pop(); const ans=j.response||j.error||'(no reply)'; thread.push({role:'a',text:ans,brain:j.brain||'ABUZ8'}); render(); if(speak) tts(ans);
+  }catch(e){ thread.pop(); thread.push({role:'a',text:'Connection error: '+e.message}); render(); } }
+$('#send').onclick=()=>send();
+$('#inp').addEventListener('input',e=>{ e.target.style.height='auto'; e.target.style.height=Math.min(120,e.target.scrollHeight)+'px'; });
+$('#inp').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } });
+function quick(t){ go('chat'); send(t); }
+let curAudio=null;
+async function tts(text){ try{ const clean=text.replace(/```[\s\S]*?```/g,' code ').replace(/[*#`>_]/g,'').slice(0,1200);
+  const r=await fetch('/api/tts',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({text:clean})}); if(!r.ok)return;
+  const u=URL.createObjectURL(await r.blob()); if(curAudio)curAudio.pause(); curAudio=new Audio(u); curAudio.play().catch(()=>{}); }catch{} }
+function speakTest(){ tts('Salaam. ABUZ8 mobile is online and connected to your computer.'); toast('Speaking…'); }
+function toggleSpeak(){ speak=!speak; sessionStorage.setItem('m_speak',speak?'1':'0'); const p=$('#speak-pill'); p.textContent=speak?'on':'off'; p.style.color=speak?'var(--acc)':'var(--txt3)'; }
+$('#brief-btn').onclick=async()=>{ const o=$('#brief-out'); o.innerHTML='<span class="spin"></span> preparing your briefing…';
+  try{ const j=await api('/api/jarvis/brief'); const b=j.briefing||j.error||'Nothing to brief.'; o.textContent=b; tts(b); }catch(e){ o.textContent='Error: '+e.message; } };
+async function loadActivity(){ $('#act-spin').innerHTML='<span class="spin"></span>';
+  try{ const j=await api('/api/activity'); const items=j.events||j.items||[]; $('#act-list').innerHTML=items.length?items.slice(0,40).map(x=>`<div class="act"><b>${esc(x.label||x.type||'event')}</b>${x.detail?' — '+esc(String(x.detail).slice(0,80)):''}</div>`).join(''):'<div class="muted">No activity yet.</div>'; }catch(e){ $('#act-list').innerHTML='<div class="muted">Could not load.</div>'; }
+  $('#act-spin').innerHTML=''; }
+async function loadStatus(){ try{ const j=await api('/api/status'); $('#status-line').textContent='Brain: '+(j.primary_brain||j.brain||'local')+' · core :'+(j.port||8900); }catch{ $('#status-line').textContent='Not reachable.'; }
+  const p=$('#speak-pill'); p.textContent=speak?'on':'off'; p.style.color=speak?'var(--acc)':'var(--txt3)'; }
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
+go('chat');
+</script>
+</body>
+</html>

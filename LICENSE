@@ -1,0 +1,21 @@
+ABUZ8 OS — Proprietary License
+Copyright (c) 2026 ABUZ8 LLC. All rights reserved.
+
+This software and its source code are proprietary and confidential. No part may
+be copied, distributed, sublicensed, or used to create derivative works without
+the express written permission of ABUZ8 LLC.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY.
+
+--- Bundled third-party components retain their own licenses ---
+- Electron — MIT
+- llama.cpp (ggml) — MIT
+- LFM2 / LFM2.5 GGUF models — LiquidAI model license (see each model card on Hugging Face)
+- Model Context Protocol servers (@modelcontextprotocol/*, mcp-server-*) — their respective licenses
+- Node.js — MIT/OpenSSL
+
+If you intend to distribute ABUZ8 OS, review and comply with each bundled
+component's license, especially the LFM2 model license terms for redistribution.

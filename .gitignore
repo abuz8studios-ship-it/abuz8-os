@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output / packaged app (ships as release assets, not source)
+out/
+dist/
+build/
+*.asar
+*.asar.unpacked/
+
+# Installers & binaries (the brain + runtime ship inside the .exe, not git)
+*.exe
+*.blockmap
+*.msi
+*.appx
+*.dmg
+*.AppImage
+*.deb
+brain/
+*.gguf
+
+# Secrets & local runtime data (config-templates/ are the safe placeholders)
+.env
+.env.*
+*.key
+*.pem
+*secret*
+*token*
+runtime-data/
+logs/
+cache/
+
+# OS / editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+*.tmp
+*.bak

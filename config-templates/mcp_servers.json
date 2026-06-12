@@ -1,0 +1,112 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "env": {},
+      "enabled": true,
+      "source": "catalog",
+      "note": "Web content fetching and conversion for efficient LLM use"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:/Users/wirec/AppData/Roaming/abuz8-os/workspaces"
+      ],
+      "env": {},
+      "enabled": true,
+      "source": "catalog",
+      "note": "Secure file operations with configurable access controls"
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "env": {},
+      "enabled": true,
+      "source": "catalog",
+      "note": "Knowledge graph–based persistent memory system"
+    },
+    "everything": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ],
+      "env": {},
+      "enabled": false,
+      "source": "catalog",
+      "note": "Reference/test server with prompts, resources, and tools"
+    },
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time"
+      ],
+      "env": {},
+      "enabled": true,
+      "source": "catalog",
+      "note": "Time and timezone conversion capabilities"
+    },
+    "docker-desktop-mcp-gateway": {
+      "command": "docker",
+      "args": [
+        "mcp",
+        "gateway",
+        "run",
+        "--block-secrets",
+        "--transport",
+        "stdio"
+      ],
+      "env": {},
+      "enabled": false,
+      "source": "catalog",
+      "note": "Expose Docker Desktop MCP Toolkit servers through one stdio gateway with secret blocking enabled"
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "env": {},
+      "enabled": true,
+      "source": "catalog",
+      "note": "Dynamic reflective problem-solving thought sequences"
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "/path"
+      ],
+      "env": {},
+      "enabled": false,
+      "source": "catalog",
+      "note": "Read, search, and manipulate Git repositories. Set --repository to a real repo path before enabling."
+    },
+    "github-context": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN=$T",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {},
+      "enabled": false,
+      "source": "catalog",
+      "note": "User profile and GitHub operational context"
+    }
+  },
+  "updated_at": "2026-06-10T14:42:30.894Z"
+}

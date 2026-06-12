@@ -1,0 +1,43 @@
+{
+  "providers": [
+    {
+      "name": "openrouter",
+      "type": "openai",
+      "endpoint": "https://openrouter.ai/api/v1",
+      "model": "openrouter/auto",
+      "api_key": "REPLACE_WITH_YOUR_KEY",
+      "enabled": true,
+      "context_length": 32768,
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 2048
+      }
+    },
+    {
+      "name": "lmstudio",
+      "type": "lmstudio",
+      "endpoint": "http://localhost:1234",
+      "model": "",
+      "api_key": "",
+      "enabled": true,
+      "context_length": 8192,
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 2048
+      }
+    },
+    {
+      "name": "ollama",
+      "type": "openai",
+      "endpoint": "http://localhost:11434/v1",
+      "model": "",
+      "api_key": "",
+      "enabled": false,
+      "context_length": 8192,
+      "parameters": {
+        "temperature": 0.7,
+        "max_tokens": 2048
+      }
+    }
+  ]
+}

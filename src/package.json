@@ -1,0 +1,9 @@
+{
+  "name": "abuz8-os",
+  "version": "1.0.0",
+  "description": "ABUZ8 OS — Sovereign Desktop",
+  "main": "main.js",
+  "author": "ABUZ8 LLC <support@abuz8ai.com>",
+  "license": "UNLICENSED",
+  "private": true
+}
