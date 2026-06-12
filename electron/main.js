@@ -17,16 +17,11 @@ let backendStatus = [];  // live log lines the renderer can show
 const OPTIONAL_LOCAL_PORTS = new Set(['3000','5173','7734','8000','8001','8002','8042','8188','8910','9119','11434','1234','18789']);
 
 function installOptionalProbeGuard() {
-  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    try {
-      const u = new URL(details.url);
-      const local = u.hostname === '127.0.0.1' || u.hostname === 'localhost';
-      if (local && OPTIONAL_LOCAL_PORTS.has(u.port) && ['xhr', 'fetch'].includes(details.resourceType)) {
-        return callback({ redirectURL: `http://127.0.0.1:8900/api/optional-probe?port=${encodeURIComponent(u.port)}` });
-      }
-    } catch {}
-    callback({});
-  });
+  // 2026-06-10 audit fix: the previous redirect blackholed every optional
+  // connector port (LM Studio 1234, Ollama 11434, ComfyUI 8188, Hermes 9119,
+  // OpenClaw 18789, Mission 8910) to a stub that answered HTTP 200, so the UI
+  // could never truly connect AND showed false "Connected" states. Probes now
+  // hit the real services; an unreachable port fails fast and reads as offline.
 }
 
 function createWindow () {

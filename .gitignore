@@ -29,10 +29,11 @@ vm-tests/
 evidence/
 
 # Large bundled runtime/model binaries are shipped through release assets,
-# not normal Git source history.
-electron/brain/*.gguf
+# not normal Git source history. The entire brain/ (llama.cpp + CUDA DLLs,
+# ~3 GB) and mcp/ (bundled node) ship as release assets, never as source.
+electron/brain/
+electron/mcp/
 electron/.brain-shelf/
-electron/mcp/node.exe
 
 # OS/editor noise
 Thumbs.db
@@ -42,5 +43,11 @@ desktop.ini
 *.bak
 *.bak*
 
+# In-place edit backups (never source)
+*.pre-*
+*.audit-backup*
+*.realistic
+
 electron/out-jarvis-all/
 electron/out-jarvis-portable/
+electron/out/

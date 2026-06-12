@@ -57,6 +57,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "voice",
+        "to": "voice",
+        "filter": [
+          "**/*.py"
+        ]
       }
     ],
     "win": {

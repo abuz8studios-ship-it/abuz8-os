@@ -1,0 +1,58 @@
+name: Build ABUZ8 OS (Win / Linux / macOS)
+
+# Builds the Electron shell for all three platforms from one tagged commit.
+# NOTE: the bundled brain/ (llama.cpp + CUDA, ~3 GB) and GGUF models are NOT in
+# git — they are downloaded/attached at release time. CI here produces the
+# cross-platform app shells so Linux + macOS users get native images from the
+# same source as the Windows reference build.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win --x64
+            artifact: abuz8-os-windows
+          - os: ubuntu-latest
+            target: --linux AppImage deb
+            artifact: abuz8-os-linux
+          - os: macos-latest
+            target: --mac dmg
+            artifact: abuz8-os-macos
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: electron
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build app shell
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'   # unsigned CI build
+        run: npx electron-builder ${{ matrix.target }} -p never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            electron/out/*.exe
+            electron/out/*.AppImage
+            electron/out/*.deb
+            electron/out/*.dmg
+          if-no-files-found: ignore

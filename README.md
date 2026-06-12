@@ -1,112 +1,111 @@
-# ABUZ8 OS Consumer Pro - Offline-First AI Agent
+# ABUZ8 OS — Sovereign Local-First AI Agent
 
-ABUZ8 OS Consumer Pro is a self-contained Windows agent desktop with one local
-brain bundled inside: `LFM2-2.6B-Exp-Q4_K_M.gguf`.
+**ABUZ8 OS** is a self-contained desktop AI operating system that runs on *your*
+hardware. It probes your machine, adopts whatever GPU and local model runners it
+finds, talks and listens in real time, controls your desktop through MCP, and
+reaches your phone — all local-first, no mandatory cloud, no API key required to
+start.
 
-It is designed to run from the buyer's own desktop, laptop, workstation, or USB
-drive without a home server. Local chat, memory, mission control, device probe,
-and the core tool dispatcher run on the user's machine.
+Built by **ABUZ8 LLC**. Windows is the reference build today; Linux and macOS
+images build from the same source through CI (see *Cross-Platform*).
 
-## What Is Bundled
+> **Truth-status legend** — every capability below is tagged:
+> `LIVE` = working and verified · `EARLY ACCESS` = working, rough edges ·
+> `ROADMAP` = designed, not yet shipped. We do not ship fake features.
 
-- Consumer Pro portable EXE and setup installer
-- Local Portable Core API on `127.0.0.1:8900`
-- Embedded llama.cpp/LFM brain on `127.0.0.1:8902`
-- One embedded model: `LFM2-2.6B-Exp-Q4_K_M.gguf`
-- Local memory and mission/Kanban board
-- Native Windows TTS endpoint (`/api/tts`) using the bundled local API and the
-  buyer's installed Windows voices
-- Native Windows STT endpoint (`/api/stt`) using the bundled local API and the
-  buyer's installed Windows speech recognizer
-- Streaming chat speech: responses are spoken sentence-by-sentence through
-  native TTS with browser TTS fallback
-- Browser microphone/STT fallback for supported Chromium/Edge environments
-- MCP bridge for Claude Desktop
-- Docker Desktop MCP import when Docker exposes `docker mcp`
-- Model download plumbing for user-approved local GGUF downloads
-- Cloud brain registration for user-owned or subscription-backed providers
+---
 
-Lite and Standard GGUF models are not included in the Consumer Pro package.
+## Capabilities
 
-## Privacy And Local Data
+### Brain & hardware
+- **`LIVE` Self-probe ("Pegasus")** — detects CPU, RAM, every NVIDIA GPU, total
+  VRAM, CUDA readiness, disk, Docker, Node, Python, and open local ports on boot.
+- **`LIVE` Auto-GPU brain** — if a CUDA GPU is present, the OS adopts the best
+  available local model automatically (verified on dual RTX 5090 / 64 GB VRAM,
+  running `nemotron3:33b`). Falls back to a bundled CPU brain on machines with no
+  GPU.
+- **`LIVE` Universal model selection** — enumerates and routes to live models
+  from **Ollama, LM Studio, vLLM, and llama.cpp** (`/v1/models`, `/api/tags`),
+  plus a curated downloadable GGUF catalog sized to your RAM/VRAM.
 
-The release does not ship with developer machine memory, private workspace data,
-portfolio dashboards, customer records, keys, tokens, or local file paths.
+### Voice (Felix-grade)
+- **`LIVE` Native streaming voice loop** — **Whisper large-v3** speech-to-text
+  and **Kokoro-82M** text-to-speech, both resident on GPU through a local
+  sidecar. Measured warm latency: ~110 ms TTS, ~440 ms STT.
+- **`LIVE` Live Talk** — hands-free, endless conversation: the OS listens
+  (browser-side voice-activity detection), transcribes, thinks, speaks the reply
+  in a natural neural voice (`bm_fable` default), then listens again.
+- **`LIVE` Graceful ladder** — GPU sidecar → Piper → Windows SAPI → browser
+  speech, so voice still works on a laptop with no GPU.
 
-On first run, ABUZ8 OS creates fresh product-owned folders on the machine where
-it is running. Memory, mission tasks, logs, model downloads, connector records,
-OAuth tokens, and cloud brain settings are stored locally only after user action
-or explicit consent.
+### Desktop & tool control
+- **`LIVE` Full OS + mouse control via MCP** — the agent drives any registered
+  MCP server through one consent-gated `mcp_call` tool. Verified two-way with
+  **Desktop Commander** (files, terminal, processes) and **Windows-MCP** (mouse
+  click/move, keyboard, screenshots, clipboard, registry, UI automation).
+- **`LIVE` MCP mesh auto-import** — on launch, imports MCP servers from **Claude
+  Desktop**, **Claude Desktop Extensions**, and **Antigravity** into one config.
+- **`LIVE` Consent gate** — every real-world action is blocked until the user
+  flips one session-scoped **Allow actions** switch.
 
-The device probe reads the current machine's CPU, RAM, GPU, storage, Docker,
-Docker MCP, Node, Python, Ollama, and local readiness state. It does not depend
-on the original build machine.
+### Reach
+- **`LIVE` Telegram bridge** — two-way chat with the OS from your phone.
+- **`LIVE` Mobile PWA** — installable web app served by the OS for phone use on
+  your LAN.
+- **`EARLY ACCESS` Own phone number (Twilio)** — two-way SMS through a real
+  carrier number you provision; the OS answers inbound texts with the brain.
+  *(Requires your own Twilio account + number. There is no "software IMEI" —
+  a real number from a carrier/VoIP provider is the honest, legal way.)*
+- **`EARLY ACCESS` Internet tunnel** — optional Cloudflare tunnel exposes the
+  mobile app over the internet. **Off by default** — it puts an OS-control
+  surface online, so enable it deliberately and treat the URL as a secret.
 
-## Offline Mode
+### Interface
+- **`LIVE` Living Superman theme** — four shades (Man of Steel, Krypton Blue,
+  Cape Red, Solar Flare) with a slow-drifting tricolor aura. Plus 9 other themes.
+- **`LIVE` Local memory + mission/Kanban board** — stored on your machine only.
 
-The bundled 2.6B local brain works without internet, an API key, or a cloud
-subscription. No home server is required.
+---
 
-Optional cloud brains, hosted model providers, OAuth connectors, and paid APIs
-require user-owned credentials or an active subscription from the relevant
-provider. ABUZ8 OS supplies the local plumbing and storage; it does not bypass
-provider authentication or payment.
+## Quick start
 
-## Action Tools
+**Windows (one-click):** download the latest release, run `Abuz8Fable.exe`. It
+self-extracts and launches; the UI opens on `127.0.0.1:8900`.
 
-The Work view includes a Tool Control panel backed by `POST /api/tools/call`.
-The built-in real-action tools are blocked until the user grants one
-session-only **Allow actions** consent:
+**From source:**
+```bash
+cd electron
+npm install
+npm start
+```
+The native GPU voice sidecar (Whisper + Kokoro) needs Python 3.11 with
+`transformers`, `torch` (CUDA), `kokoro`, and `soundfile`. Without it, voice
+falls back to Piper/Windows/browser automatically.
 
-- `open_url`
-- `open_app`
-- `screenshot`
-- `file_write`
-- `shell_run`
+---
 
-`open_app` is allowlisted to notepad, mspaint, calc, and explorer. `shell_run`
-is allowlisted to whoami, hostname, and dir. `file_write` cannot write outside
-the ABUZ8 portable data sandbox.
+## Privacy & local-first
 
-Chat also has an agentic middle layer: plain-language requests can trigger
-permission-gated tool calls through the same dispatcher.
+No developer data ships in the release. On first run the OS creates fresh,
+product-owned folders for memory, logs, model downloads, and connector records.
+Cloud brains, OAuth connectors, Twilio, and tunnels are **opt-in** and only
+store credentials locally after you provide them. The OS never bypasses any
+provider's authentication or payment.
 
-## Model Extensibility
+---
 
-Portable Core includes local endpoints for:
+## Cross-platform
 
-- `POST /api/models/huggingface/download`
-- `GET /api/models/list`
-- `POST /api/cloud-brains/register`
-- `POST /api/cli/probe`
-- `POST /api/cli/register`
-- `POST /api/oauth/exchange`
+The reference build is Windows x64. The same Electron source targets Linux
+(`AppImage`/`deb`) and macOS (`dmg`) through `electron-builder`; a CI matrix
+(`.github/workflows/build.yml`) produces all three from a tagged commit. GPU
+voice and CUDA features require an NVIDIA GPU on the host regardless of OS.
 
-Downloaded GGUF files under the local ABUZ8 data folder become selectable local
-brains. Cloud brain records are stored locally and may reference user-owned
-environment variables, OAuth tokens, or subscription credentials.
+---
 
-## Verification
+## License & contact
 
-The release verifier launches the Consumer Pro 2.6B portable from an isolated
-data folder and checks:
+Proprietary — © 2026 ABUZ8 LLC. See `LICENSE.txt` / `EULA_COMMERCIAL.txt`.
+Bundled third-party components retain their own licenses (`THIRD_PARTY_NOTICES.txt`).
 
-- local core health
-- embedded 2.6B brain with `fallback:false`
-- exactly one embedded GGUF model
-- device probe from the current machine
-- local memory and mission board
-- native Windows TTS returning WAV audio
-- native Windows STT transcribing that WAV through `/api/stt`
-- Claude Desktop MCP bridge
-- tool dispatcher consent gates
-- action tools by observed OS side effects
-- cleanup after verification
-
-Parakeet/Whisper model assets can be added to the local model shelf for heavier
-speech recognition later, but the default portable release uses Windows native
-speech APIs so the USB build does not depend on a developer Python environment.
-
-## Contact
-
-ABUZ8 LLC - support@abuz8ai.com
+ABUZ8 LLC — support@abuz8ai.com

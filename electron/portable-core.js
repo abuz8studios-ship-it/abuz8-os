@@ -9,69 +9,152 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
-const jarvis = require('./jarvis-integration');
-let jarvisHandler = null;
 
 const PORT = Number(process.env.QADIR_PORT || process.env.ABUZ8_PORT || 8900);
 const LFM_PORT = Number(process.env.ABUZ8_LFM_PORT || 8902);
 
 let server = null;
+let serverHost = '127.0.0.1';
 let dataRoot = null;
+// Live activity feed (Manus-style): an in-memory ring buffer the UI polls.
+const activityLog = [];
+let activitySeq = 0;
+let agentRunning = false;
+function pushActivity(type, label, detail) {
+  activitySeq += 1;
+  activityLog.push({ id: activitySeq, t: new Date().toISOString(), type, label: String(label || '').slice(0, 120), detail: String(detail || '').slice(0, 240) });
+  if (activityLog.length > 300) activityLog.shift();
+  return activitySeq;
+}
 let logFn = (m) => console.log('[portable-core] ' + m);
 const jobs = [];
 let lfmProcess = null;
 let lfmStarting = false;
-
-// ===== Jarvis multi-brain pool (Step 1) =====
-// Three brains run in parallel on separate ports. A lightweight router picks
-// which tier answers each request. Backward compatible with single-brain path.
-const BRAIN_POOL_PORTS = {
-  lite: 8903,
-  standard: 8904,
-  pro: 8902 // same port as legacy single-brain; pool will avoid double-spawn if lfmProcess holds this port
-};
-const BRAIN_POOL_FILES = {
-  lite: 'LFM2.5-350M-Q4_K_M.gguf',
-  standard: 'LFM2-1.2B-Tool-Q4_K_M.gguf',
-  pro: 'LFM2-2.6B-Exp-Q4_K_M.gguf'
-};
-let brainPool = []; // [{tier, port, file, process, alive, lastError}]
-let brainPoolStarting = false;
-let brainPoolEnabled = false; // becomes true after startBrainPool() succeeds for >=1 tier
 let lastLfmError = '';
 let activeBrain = null;
 let hostExecutable = null;
 let actionConsentGranted = false;
+const mcpProcesses = new Map();
 
-const EMBEDDED_BRAIN_CATALOG = [
+// The LFM brains were removed to keep the OS lean — NVIDIA Nemotron 3 Nano 4B
+// (a downloaded GGUF) is the primary brain now. Any GGUF dropped in the models
+// shelf still appears as a selectable brain via downloadedGgufBrains().
+const EMBEDDED_BRAIN_CATALOG = [];
+
+// Predefined executive agents the user can pick. Each is a system prompt plus a
+// recommended real toolset. No personas are faked — every listed tool exists.
+const AGENT_ROLES = [
   {
-    id: 'lfm2.5-350m-lite',
-    name: 'LFM2.5 350M Lite',
-    file: 'LFM2.5-350M-Q4_K_M.gguf',
-    tier: 'lite',
-    role: 'fast offline helper for weak laptops and USB-first installs',
-    min_ram_gb: 4,
-    context: 1536
+    id: 'orchestrator',
+    name: 'Orchestrator',
+    tagline: 'Executive coordinator — plans, routes, and delegates across every tool.',
+    tools: ['web_search', 'cmd_run', 'file_write', 'open_app', 'open_url', 'screenshot', 'abuz8_memory_write', 'abuz8_mission_board'],
+    system: 'You are ABUZ8 OS Orchestrator, the executive controller of a local agent operating system. You plan multi-step work, decide which tool or sub-agent fits, and keep answers decisive and technical. You have native control of this machine through the host tools. Be direct, no filler.'
   },
   {
-    id: 'lfm2-1.2b-tool',
-    name: 'LFM2 1.2B Tool',
-    file: 'LFM2-1.2B-Tool-Q4_K_M.gguf',
-    tier: 'standard',
-    role: 'balanced tool planner for everyday agent work',
-    min_ram_gb: 8,
-    context: 2048
+    id: 'research-analyst',
+    name: 'Research Analyst',
+    tagline: 'Live web research and source synthesis.',
+    tools: ['web_search', 'open_url', 'abuz8_memory_write'],
+    system: 'You are ABUZ8 OS Research Analyst. You gather current information with web_search and fetch, cross-check sources, and synthesize concise, cited findings. State uncertainty plainly. Never invent facts or URLs.'
   },
   {
-    id: 'lfm2-2.6b-pro',
-    name: 'LFM2 2.6B Pro',
-    file: 'LFM2-2.6B-Exp-Q4_K_M.gguf',
-    tier: 'pro',
-    role: 'strongest bundled reasoning brain for business and creator tasks',
-    min_ram_gb: 12,
-    context: 2048
+    id: 'systems-engineer',
+    name: 'Systems Engineer',
+    tagline: 'Inspects the host, runs CLIs, drives MCP servers.',
+    tools: ['cmd_run', 'shell_run', 'cli_probe', 'web_search'],
+    system: 'You are ABUZ8 OS Systems Engineer. You inspect and operate this machine through the command line and MCP servers. Explain what a command does before proposing it, prefer read-only diagnostics first, and report exact output. You are precise and safety-aware but you do execute real work.'
+  },
+  {
+    id: 'desktop-operator',
+    name: 'Desktop Operator',
+    tagline: 'Native desktop actions — apps, files, screenshots, URLs.',
+    tools: ['open_app', 'open_url', 'screenshot', 'file_write', 'cmd_run'],
+    system: 'You are ABUZ8 OS Desktop Operator. You carry out native desktop actions: launching apps, writing files in the sandbox, opening URLs, and capturing the screen. Confirm the concrete action taken and its result path. Do only what is asked.'
+  },
+  {
+    id: 'automation-builder',
+    name: 'Automation Builder',
+    tagline: 'Creates new tools and wires connectors.',
+    tools: ['abuz8_tool_create', 'cli_probe', 'web_search'],
+    system: 'You are ABUZ8 OS Automation Builder. You design and register new local tools and connectors, defining clear names, commands, and arguments. Produce working tool definitions, not placeholders.'
+  },
+  {
+    id: 'knowledge-keeper',
+    name: 'Knowledge Keeper',
+    tagline: 'Reads, writes, and searches local memory.',
+    tools: ['abuz8_memory_write', 'memory_search'],
+    system: 'You are ABUZ8 OS Knowledge Keeper. You capture durable facts to local memory and retrieve them on request. Keep entries atomic and well-labeled. Never expose data outside this machine.'
+  },
+  // ── Executive / growth roles migrated from the Hermes operator-mode & X-growth playbooks ──
+  {
+    id: 'ceo-operator',
+    name: 'CEO / Operator',
+    tagline: 'Runs the company in Operator Mode — revenue-first, no permission theater.',
+    tools: ['abuz8_mission_board', 'abuz8_mission_task_create', 'swarm_run', 'web_search', 'cmd_run', 'abuz8_memory_write'],
+    system: 'You are the ABUZ8 OS CEO / Operator. You run the user’s one-person company in Operator Mode. RULES: (1) Revenue first — judge every task by whether it moves money or builds a revenue asset; deprioritize the rest. (2) No permission theater — once direction is clear, execute; do not ask "shall I continue?" after each step. (3) Massive action bias — ship the whole plan (e.g. a 7-day calendar), not one item at a time. (4) Multi-agent output — when parts can be produced in parallel, produce them together. (5) Fact-check specs/pricing before publishing. You delegate via the Kanban board and the swarm. Coordinate Sales, Content, Distribution, Research, and Kanban-Ops sub-agents. Be decisive and concrete.'
+  },
+  {
+    id: 'seo-strategist',
+    name: 'SEO Strategist',
+    tagline: 'Keyword strategy, content architecture, technical + on-page SEO.',
+    tools: ['web_search', 'content_generate', 'abuz8_memory_write'],
+    system: 'You are the ABUZ8 OS SEO Strategist. You plan keyword clusters and search intent, design site/content architecture and internal linking, and write on-page + technical SEO recommendations (titles, meta, schema, Core Web Vitals, crawlability). Ground recommendations in real search behavior and state assumptions. Output concrete briefs, not generic advice.'
+  },
+  {
+    id: 'x-growth-operator',
+    name: 'X Growth Operator',
+    tagline: 'Audience growth + monetization on X. Carousels, threads, 25-problems protocol.',
+    tools: ['content_generate', 'x_post', 'web_search', 'abuz8_mission_task_create'],
+    system: 'You are the ABUZ8 OS X Growth Operator, running the migrated x-growth-monetization playbook v2. Engine: carousel posts (10–15 slides: hook → problem → why it matters → mental model → steps → proof → TL;DR → CTA), 3× daily, plus 5–8 short tweets and live threads. Signature protocol: publicly solve 25 of the hardest problems in the niche per week, each tagged with the user’s signature. Engage every reply, quote-RT with added insight, weekly AMA. Track impressions/engagement/follower growth and iterate. Revenue paths: ad share, digital products, affiliates, sponsorships. Fact-check all specs/pricing before drafting. Produce ready-to-post content, not theory.'
+  },
+  {
+    id: 'content-producer',
+    name: 'Content Producer',
+    tagline: 'NotebookLM-style synthesis → YouTube scripts, threads, carousels.',
+    tools: ['content_generate', 'web_search', 'file_write'],
+    system: 'You are the ABUZ8 OS Content Producer. You synthesize sources into structured content the way a research-to-media pipeline does: ingest notes/links, extract the spine, then produce the requested format — YouTube script (hook, beats, B-roll cues, CTA), X carousel, thread, blog outline, or show notes. Keep a consistent voice and a single CTA. Mark anything you could not verify rather than inventing it.'
+  },
+  {
+    id: 'swarm-orchestrator',
+    name: 'Swarm Orchestrator',
+    tagline: 'Decomposes a goal and runs a multi-agent swarm to completion.',
+    tools: ['swarm_run', 'abuz8_mission_task_create', 'cmd_run', 'web_search'],
+    system: 'You are the ABUZ8 OS Swarm Orchestrator. You decompose a goal into parallel work, assign each part to the best specialized role, run them as a swarm, then verify and synthesize the results into one coherent deliverable. Topology: orchestrator → workers → verifier → synthesis. Name the sub-agents you used and reconcile conflicts explicitly.'
   }
 ];
+
+function resolveRoleSystem(roleId) {
+  if (!roleId || roleId === 'default' || roleId === 'auto') return null;
+  const role = AGENT_ROLES.find((r) => r.id === roleId || slug(r.name) === slug(roleId));
+  return role ? role.system : null;
+}
+
+// ── Soul: persistent personality + mission, Hermes-style, loaded into every chat ──
+const DEFAULT_SOUL = `You are ABUZ8 — a sharp, loyal, JARVIS-class operator OS for your owner. Voice: confident, concise, a little wry; never robotic, never groveling. You take initiative: when a request implies an action you can perform (open an app or site, run a command, search, create a tool), you DO it rather than describing it. You speak plainly, fact-check before asserting specs or prices, and you never fake a result — if something needs a key or isn't possible, you say so in one line and offer the next best move.`;
+const DEFAULT_MISSION = `Standing mission: help the owner build a one-person company that generates revenue through content creation and mass SEO/social marketing. Bias every suggestion toward shipping assets that compound (carousels, threads, articles, tools) and toward the X signature protocol of publicly solving hard problems. Revenue-first, massive action, no permission theater.`;
+
+function soulDir() { return safeMkdir(path.join(dataRoot, 'soul')); }
+function readTextFile(f, fallback) { try { return fs.readFileSync(f, 'utf8'); } catch { return fallback; } }
+function loadSoul() {
+  const p = path.join(soulDir(), 'SOUL.md');
+  const m = path.join(soulDir(), 'MISSION.md');
+  if (!exists(p)) fs.writeFileSync(p, DEFAULT_SOUL, 'utf8');
+  if (!exists(m)) fs.writeFileSync(m, DEFAULT_MISSION, 'utf8');
+  return { personality: readTextFile(p, DEFAULT_SOUL).trim(), mission: readTextFile(m, DEFAULT_MISSION).trim() };
+}
+function saveSoul(patch = {}) {
+  if (typeof patch.personality === 'string') fs.writeFileSync(path.join(soulDir(), 'SOUL.md'), patch.personality, 'utf8');
+  if (typeof patch.mission === 'string') fs.writeFileSync(path.join(soulDir(), 'MISSION.md'), patch.mission, 'utf8');
+  return loadSoul();
+}
+// Compose the full system prompt: soul personality + active role + standing mission.
+function composeSystem(roleId, explicit) {
+  if (explicit) return explicit;
+  const soul = dataRoot ? loadSoul() : { personality: DEFAULT_SOUL, mission: DEFAULT_MISSION };
+  const role = resolveRoleSystem(roleId);
+  return [soul.personality, role, soul.mission].filter(Boolean).join('\n\n');
+}
 
 function safeMkdir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -254,70 +337,27 @@ function localToolsList() {
     { name: 'abuz8_tool_create', type: 'mcp', status: 'ready', description: 'Create a local ABUZ8 tool definition.' },
     { name: 'abuz8_tool_call', type: 'mcp', status: 'ready', description: 'Execute a local ABUZ8 built-in or registered tool by name.' },
     { name: 'abuz8_mission_board', type: 'mcp', status: 'ready', description: 'Read the local mission/Kanban board.' },
-    { name: 'abuz8_mission_auto_probe', type: 'mcp', status: 'ready', description: 'Probe the current host device and store a local Mission Control readiness profile.' },
     { name: 'abuz8_mission_task_create', type: 'mcp', status: 'ready', description: 'Create or update a mission task from Claude Desktop.' },
     { name: 'abuz8_mission_task_move', type: 'mcp', status: 'ready', description: 'Move a mission task between Kanban columns.' },
     { name: 'huggingface_model_download', type: 'local-api', status: 'permission-gated', description: 'Download model files to the local model shelf with allow_network_download.' },
     { name: 'model_download_hf', type: 'network-model', status: 'permission-gated', description: 'Alias for downloading a user-approved Hugging Face GGUF into the portable data model shelf.' },
     { name: 'cloud_brain_register', type: 'cloud-model', status: 'permission-gated', description: 'Register a user-owned cloud brain endpoint or provider key reference locally.' },
     { name: 'open_url', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an http/https URL in the default browser after Allow actions consent.' },
-    { name: 'web_search', type: 'network', status: 'ready', description: 'Search the public web for current information and return a short sourced result.' },
-    { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, chrome, edge, browser, calc, or explorer.' },
-    { name: 'create_visual_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Research a requested visual subject, create an original image from current reference notes, and open it in Microsoft Paint.' },
-    { name: 'draw_monkey_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Legacy local proof tool. Prefer create_visual_in_paint for user creation requests.' },
+    { name: 'open_app', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Open an allowlisted desktop app: notepad, mspaint, calc, or explorer.' },
+    { name: 'draw_monkey_in_paint', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Create a simple monkey drawing in the portable sandbox and open it in Microsoft Paint.' },
     { name: 'screenshot', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Capture the primary screen to the portable data shots folder.' },
     { name: 'file_write', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Write a text file inside the portable data sandbox only.' },
-    { name: 'shell_run', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Run only allowlisted shell probes: whoami, hostname, or dir. Default deny.' },
+    { name: 'shell_run', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Run allowlisted quick probes: whoami, hostname, or dir.' },
+    { name: 'cmd_run', type: 'action', status: actionConsentGranted ? 'ready' : 'blocked', description: 'Run any local CLI command or shell pipeline with full native control after Allow actions consent.' },
     { name: 'cli_probe', type: 'local-api', status: 'permission-gated', description: 'Probe local CLIs with allow_cli.' },
     { name: 'cli_register', type: 'local-api', status: 'permission-gated', description: 'Register a local CLI bridge with allow_cli.' },
     { name: 'oauth_exchange', type: 'local-api', status: 'permission-gated', description: 'Store user-authorized OAuth tokens locally with allow_oauth_store.' },
-    { name: 'embedded_brain_runtime', type: 'local-runtime', status: brain?.embedded ? 'ready' : 'fallback', description: brain?.embedded ? `${brain.name} selected automatically.` : 'No embedded GGUF selected.' }
+    { name: 'embedded_brain_runtime', type: 'local-runtime', status: brain?.embedded ? 'ready' : 'fallback', description: brain?.embedded ? `\${brain.name} selected automatically.` : 'No embedded GGUF selected.' },
+    { name: 'web_search', type: 'local-api', status: 'ready', description: 'Real-time web search via DuckDuckGo HTML scraping. Returns structured results with titles, URLs, and snippets.' },
+    { name: 'browser_do', type: 'action', status: browserAutomationAvailable() ? 'ready' : 'attachment-missing', description: 'Drive a real browser with Playwright: navigate, click, fill, screenshot, extract page text.' },
+    { name: 'gui_do', type: 'action', status: guiAutomationAvailable() ? (actionConsentGranted ? 'ready' : 'blocked') : 'attachment-missing', description: 'Control the real mouse/keyboard/screen with PyAutoGUI (move, click, type, hotkey, screenshot).' }
   ];
   return builtIns.concat(readCustomTools());
-}
-
-function modelRoots() {
-  return [
-    path.join(dataRoot, 'models'),
-    path.join(dataRoot, 'brain'),
-    path.join(__dirname, 'brain'),
-    path.join(__dirname, 'models'),
-    process.env.ABUZ8_MODELS_DIR,
-    'E:\\ABU\\MODELS'
-  ].filter(Boolean);
-}
-
-function listLocalModelAssets() {
-  const rows = [];
-  const wanted = /\.(gguf|onnx|pth|safetensors|bin|wav)$/i;
-  const walk = (dir, depth = 0) => {
-    if (depth > 3 || rows.length >= 160) return;
-    let items = [];
-    try { items = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const item of items) {
-      const full = path.join(dir, item.name);
-      if (item.isDirectory()) {
-        if (!/node_modules|__pycache__|\.git|site-packages|venv/i.test(full)) walk(full, depth + 1);
-      } else if (wanted.test(item.name)) {
-        let stat = null;
-        try { stat = fs.statSync(full); } catch {}
-        rows.push({
-          name: item.name,
-          path: full,
-          kind: /\.gguf$/i.test(item.name) ? 'reasoning' : /\.wav$/i.test(item.name) ? 'reference-voice' : /\.(onnx|pth)$/i.test(item.name) ? 'voice-or-vision' : 'model',
-          mb: stat ? Math.round((stat.size / 1024 / 1024) * 10) / 10 : null
-        });
-      }
-    }
-  };
-  modelRoots().forEach((r) => walk(r));
-  const seen = new Set();
-  return rows.filter((r) => {
-    const key = r.path.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function readCustomTools() {
@@ -360,46 +400,80 @@ function normalizeHttpUrl(input) {
   return parsed.toString();
 }
 
+function actionsAllowed() {
+  if (actionConsentGranted) return true;
+  // Honor the persisted setting so consent survives relaunch (the UI toggle writes this).
+  try { return readJson(settingsPath(), {}).auto_grant_actions === true; } catch { return false; }
+}
+
 function requireActionConsent() {
-  if (!actionConsentGranted) {
-    throw new Error('Action tools are blocked until the user grants Allow actions consent for this session.');
+  if (!actionsAllowed()) {
+    throw new Error('Action tools are blocked until the user enables Allow actions.');
   }
 }
 
+// Apps the agent can launch by name. Browsers/Office/utilities resolve through
+// the Windows App Paths registry via `start`, so they work without a full path.
 function normalizeAllowedApp(name) {
   const key = slug(name || '');
   const apps = {
-    notepad: { file: 'notepad.exe', label: 'Notepad' },
-    mspaint: { file: 'mspaint.exe', label: 'Paint' },
-    paint: { file: 'mspaint.exe', label: 'Paint' },
-    chrome: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'chrome'], label: 'Google Chrome' },
-    googlechrome: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'chrome'], label: 'Google Chrome' },
-    browser: { file: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', 'https://www.google.com'], label: 'Default browser' },
-    defaultbrowser: { file: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', 'https://www.google.com'], label: 'Default browser' },
-    edge: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'msedge'], label: 'Microsoft Edge' },
-    msedge: { file: 'cmd.exe', args: ['/d', '/c', 'start', '""', 'msedge'], label: 'Microsoft Edge' },
-    calc: { file: 'calc.exe', label: 'Calculator' },
-    calculator: { file: 'calc.exe', label: 'Calculator' },
-    explorer: { file: 'explorer.exe', label: 'File Explorer' }
+    notepad: { target: 'notepad', label: 'Notepad' },
+    mspaint: { target: 'mspaint', label: 'Paint' },
+    paint: { target: 'mspaint', label: 'Paint' },
+    calc: { target: 'calc', label: 'Calculator' },
+    calculator: { target: 'calc', label: 'Calculator' },
+    explorer: { target: 'explorer', label: 'File Explorer' },
+    files: { target: 'explorer', label: 'File Explorer' },
+    chrome: { target: 'chrome', label: 'Google Chrome' },
+    'google-chrome': { target: 'chrome', label: 'Google Chrome' },
+    edge: { target: 'msedge', label: 'Microsoft Edge' },
+    msedge: { target: 'msedge', label: 'Microsoft Edge' },
+    firefox: { target: 'firefox', label: 'Firefox' },
+    brave: { target: 'brave', label: 'Brave' },
+    word: { target: 'winword', label: 'Word' },
+    excel: { target: 'excel', label: 'Excel' },
+    powerpoint: { target: 'powerpnt', label: 'PowerPoint' },
+    outlook: { target: 'outlook', label: 'Outlook' },
+    cmd: { target: 'cmd', label: 'Command Prompt' },
+    terminal: { target: 'wt', label: 'Windows Terminal' },
+    powershell: { target: 'powershell', label: 'PowerShell' },
+    'task-manager': { target: 'taskmgr', label: 'Task Manager' },
+    taskmgr: { target: 'taskmgr', label: 'Task Manager' },
+    settings: { target: 'ms-settings:', label: 'Settings' },
+    spotify: { target: 'spotify', label: 'Spotify' },
+    code: { target: 'code', label: 'VS Code' },
+    vscode: { target: 'code', label: 'VS Code' }
   };
   return apps[key] || null;
 }
 
+// Launch via `start` so browsers, URLs, App-Paths apps, and shell verbs all work.
+function launchViaStart(target, extra = []) {
+  const quote = (s) => `"${String(s).replace(/"/g, '')}"`;
+  const cmdline = `start "" ${quote(target)} ${extra.map(quote).join(' ')}`.trim();
+  const child = spawn(cmdline, { shell: true, detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  return { launched: true, target, args: extra };
+}
+
 async function startProcessDetached(file, args = []) {
-  const child = spawn(file, args.map(String), {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false
-  });
+  const child = spawn(file, args.map(String), { detached: true, stdio: 'ignore', windowsHide: false });
   child.unref();
   return { launched: true, pid: child.pid, file, args };
 }
 
 async function actionOpenApp(args = {}) {
   requireActionConsent();
-  const app = normalizeAllowedApp(args.name || args.app || args.target || '');
-  if (!app) throw new Error('Unsupported app. Allowed apps: notepad, mspaint, chrome, edge, browser, calc, explorer.');
-  const result = await startProcessDetached(app.file, app.args || []);
+  const raw = args.name || args.app || args.target || '';
+  const app = normalizeAllowedApp(raw);
+  if (!app) {
+    // Unknown name: try launching it directly through `start` (resolves App Paths).
+    const guess = slug(raw);
+    if (!guess) throw new Error('No app name supplied.');
+    const r = launchViaStart(guess);
+    return { ...r, app: guess, note: 'Launched via Windows start; if nothing opened, the app is not installed or not on App Paths.' };
+  }
+  const result = launchViaStart(app.target);
   return { ...result, app: app.label };
 }
 
@@ -452,265 +526,50 @@ async function actionDrawMonkeyInPaint(args = {}) {
   return { ...opened, app: 'Paint', file, bytes: fs.statSync(file).size };
 }
 
-async function actionDrawCartoonRabbitInPaint(args = {}) {
-  requireActionConsent();
-  const artDir = safeMkdir(path.join(dataRoot, 'art'));
-  const file = path.join(artDir, `paint-cartoon-rabbit-${Date.now()}.png`);
-  const scriptFile = path.join(safeMkdir(path.join(dataRoot, 'cache')), `draw-rabbit-${process.pid}-${Date.now()}.ps1`);
-  const caption = String(args.caption || 'Original cartoon rabbit drawn locally').replace(/'/g, "''").slice(0, 90);
-  const script = [
-    'param([string]$OutFile, [string]$Caption)',
-    'Add-Type -AssemblyName System.Drawing',
-    '$bmp = New-Object System.Drawing.Bitmap 900, 700',
-    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
-    '$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
-    '$g.FillRectangle([System.Drawing.Brushes]::White, 0, 0, 900, 700)',
-    '$fur = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(205, 214, 210))',
-    '$fur2 = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(152, 168, 160))',
-    '$pink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 176, 196))',
-    '$ink = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(35, 45, 42), 6)',
-    '$thin = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(35, 45, 42), 3)',
-    '$smile = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(60, 70, 66), 4)',
-    '$g.FillEllipse($fur, 285, 88, 105, 275)',
-    '$g.FillEllipse($fur, 510, 88, 105, 275)',
-    '$g.FillEllipse($pink, 318, 125, 42, 205)',
-    '$g.FillEllipse($pink, 543, 125, 42, 205)',
-    '$g.FillEllipse($fur, 250, 220, 400, 350)',
-    '$g.FillEllipse($fur2, 330, 405, 240, 120)',
-    '$g.FillEllipse([System.Drawing.Brushes]::White, 355, 330, 70, 85)',
-    '$g.FillEllipse([System.Drawing.Brushes]::White, 475, 330, 70, 85)',
-    '$g.FillEllipse([System.Drawing.Brushes]::Black, 383, 365, 22, 25)',
-    '$g.FillEllipse([System.Drawing.Brushes]::Black, 503, 365, 22, 25)',
-    '$g.FillEllipse($pink, 426, 422, 48, 35)',
-    '$g.DrawArc($smile, 397, 438, 55, 45, 20, 130)',
-    '$g.DrawArc($smile, 448, 438, 55, 45, 30, 130)',
-    '$g.DrawLine($thin, 390, 430, 285, 395)',
-    '$g.DrawLine($thin, 390, 452, 278, 455)',
-    '$g.DrawLine($thin, 510, 430, 615, 395)',
-    '$g.DrawLine($thin, 510, 452, 622, 455)',
-    '$g.DrawEllipse($ink, 250, 220, 400, 350)',
-    '$g.DrawEllipse($thin, 285, 88, 105, 275)',
-    '$g.DrawEllipse($thin, 510, 88, 105, 275)',
-    '$font = New-Object System.Drawing.Font "Segoe UI", 22, ([System.Drawing.FontStyle]::Bold)',
-    '$g.DrawString($Caption, $font, [System.Drawing.Brushes]::Black, 220, 610)',
-    '$bmp.Save($OutFile, [System.Drawing.Imaging.ImageFormat]::Png)',
-    '$g.Dispose(); $bmp.Dispose(); $fur.Dispose(); $fur2.Dispose(); $pink.Dispose(); $ink.Dispose(); $thin.Dispose(); $smile.Dispose(); $font.Dispose()'
-  ].join(os.EOL);
-  fs.writeFileSync(scriptFile, script, 'utf8');
-  const drawn = await runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, file, caption], 20000);
-  try { fs.unlinkSync(scriptFile); } catch {}
-  if (!drawn.ok || !fs.existsSync(file)) throw new Error(drawn.stderr || drawn.stdout || 'Rabbit drawing failed.');
-  const opened = await startProcessDetached('mspaint.exe', [file]);
-  return { ...opened, app: 'Paint', file, bytes: fs.statSync(file).size };
+// Resolve a site name or bare domain to a URL. Handles "youtube", "youtube.com",
+// "gmail", optional search query (e.g. youtube search), and full URLs.
+const SITE_MAP = {
+  youtube: 'https://www.youtube.com', yt: 'https://www.youtube.com',
+  google: 'https://www.google.com', gmail: 'https://mail.google.com',
+  github: 'https://github.com', x: 'https://x.com', twitter: 'https://x.com',
+  reddit: 'https://www.reddit.com', maps: 'https://maps.google.com',
+  chatgpt: 'https://chat.openai.com', claude: 'https://claude.ai',
+  amazon: 'https://www.amazon.com', wikipedia: 'https://www.wikipedia.org',
+  netflix: 'https://www.netflix.com', linkedin: 'https://www.linkedin.com',
+  instagram: 'https://www.instagram.com', facebook: 'https://www.facebook.com',
+  huggingface: 'https://huggingface.co', drive: 'https://drive.google.com'
+};
+function resolveSiteUrl(name, search) {
+  const raw = String(name || '').trim();
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const key = slug(raw);
+  let base = SITE_MAP[key];
+  if (!base && /\.[a-z]{2,}$/i.test(raw)) base = 'https://' + raw.replace(/^\/+/, '');
+  if (!base) return null;
+  if (search) {
+    if (key === 'youtube' || key === 'yt') return `${base}/results?search_query=${encodeURIComponent(search)}`;
+    if (key === 'google') return `${base}/search?q=${encodeURIComponent(search)}`;
+    if (key === 'github') return `${base}/search?q=${encodeURIComponent(search)}`;
+    if (key === 'amazon') return `${base}/s?k=${encodeURIComponent(search)}`;
+    if (key === 'reddit') return `${base}/search/?q=${encodeURIComponent(search)}`;
+  }
+  return base;
 }
 
 async function actionOpenUrl(args = {}) {
   requireActionConsent();
-  const url = normalizeHttpUrl(args.url || args.href || args.query);
-  const result = await startProcessDetached('rundll32.exe', ['url.dll,FileProtocolHandler', url]);
-  return { ...result, browser: 'default', url };
-}
-
-function fetchJsonUrl(url, timeout = 12000) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'user-agent': 'ABUZ8-OS-Agent/1.0' } }, (r) => {
-      let data = '';
-      r.setEncoding('utf8');
-      r.on('data', (d) => { data += d; if (data.length > 1024 * 1024) req.destroy(new Error('response too large')); });
-      r.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error(`invalid JSON from web search: ${e.message}`)); }
-      });
-    });
-    req.setTimeout(timeout, () => req.destroy(new Error('web search timeout')));
-    req.on('error', reject);
-  });
-}
-
-function fetchTextUrl(url, timeout = 12000) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'user-agent': 'ABUZ8-OS-Agent/1.0' } }, (r) => {
-      let data = '';
-      r.setEncoding('utf8');
-      r.on('data', (d) => { data += d; if (data.length > 1024 * 1024) req.destroy(new Error('response too large')); });
-      r.on('end', () => resolve(data));
-    });
-    req.setTimeout(timeout, () => req.destroy(new Error('web fetch timeout')));
-    req.on('error', reject);
-  });
-}
-
-function decodeXmlText(text) {
-  return String(text || '')
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'");
-}
-
-function parseRssItems(xml, limit = 5) {
-  return [...String(xml || '').matchAll(/<item\b[\s\S]*?<\/item>/gi)].slice(0, limit).map((m) => {
-    const item = m[0];
-    const title = decodeXmlText((item.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || '').trim();
-    const link = decodeXmlText((item.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '').trim();
-    const pubDate = decodeXmlText((item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i) || [])[1] || '').trim();
-    return { title, url: link, pubDate };
-  }).filter((x) => x.title);
-}
-
-async function actionWebSearch(args = {}) {
-  const query = String(args.query || args.q || args.prompt || '').trim();
-  if (!query) throw new Error('web_search requires query.');
-  if (/\b(news|latest|current|today|recent)\b/i.test(query)) {
-    try {
-      const rssUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss`;
-      const xml = await fetchTextUrl(rssUrl);
-      const items = parseRssItems(xml, 5);
-      if (items.length) {
-        const result = {
-          query,
-          source: 'Bing News RSS',
-          answer: `Top current results for "${query}":`,
-          url: rssUrl,
-          related: items.map((x) => ({ text: `${x.title}${x.pubDate ? ` (${x.pubDate})` : ''}`, url: x.url }))
-        };
-        if (args.open_browser && actionConsentGranted) {
-          result.opened = await startProcessDetached('rundll32.exe', ['url.dll,FileProtocolHandler', rssUrl]).catch((e) => ({ ok: false, error: e.message }));
-        }
-        return result;
-      }
-    } catch {}
+  // Accept url, a site name (+ optional search), or a raw query.
+  let url = args.url || args.href;
+  if (!url && (args.site || args.name)) url = resolveSiteUrl(args.site || args.name, args.search);
+  url = normalizeHttpUrl(url || args.query);
+  const browserKey = args.browser ? slug(args.browser) : '';
+  const browser = browserKey && normalizeAllowedApp(browserKey);
+  if (browser) {
+    const r = launchViaStart(browser.target, [url]);
+    return { ...r, browser: browser.label, url };
   }
-  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`;
-  const data = await fetchJsonUrl(url);
-  const related = Array.isArray(data.RelatedTopics)
-    ? data.RelatedTopics.flatMap((t) => t.Topics || [t]).filter((t) => t && (t.Text || t.FirstURL)).slice(0, 5)
-    : [];
-  const result = {
-    query,
-    source: 'DuckDuckGo Instant Answer',
-    answer: data.AbstractText || data.Answer || '',
-    heading: data.Heading || '',
-    url: data.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-    related: related.map((t) => ({ text: t.Text || '', url: t.FirstURL || '' }))
-  };
-  if (args.open_browser && actionConsentGranted) {
-    result.opened = await startProcessDetached('rundll32.exe', ['url.dll,FileProtocolHandler', result.url]).catch((e) => ({ ok: false, error: e.message }));
-  }
-  return result;
-}
-
-function extractCreativeSubject(text) {
-  const raw = String(text || '').trim();
-  const looksLike = raw.match(/\bwhat\s+(.+?)\s+looks?\s+like\b/i);
-  const ofThing = raw.match(/\b(?:picture|image|drawing|painting|sketch|illustration|art)\s+of\s+(.+?)(?:\s+in\s+(?:paint|mspaint|microsoft paint)|$)/i);
-  const drawThing = raw.match(/\b(?:draw|create|make|generate|design|sketch|illustrate)\s+(?:me\s+)?(?:a|an|the)?\s*(.+?)(?:\s+in\s+(?:paint|mspaint|microsoft paint)|[.!?]|$)/i);
-  let subject = (looksLike && looksLike[1]) || (ofThing && ofThing[1]) || (drawThing && drawThing[1]) || raw;
-  subject = subject
-    .replace(/\bresearch\b.*?\bwhat\b/gi, ' ')
-    .replace(/\bopen\s+(?:microsoft\s+)?paint\s+(?:and|then)?\b/gi, ' ')
-    .replace(/\b(draw|paint|create|make|generate|design|sketch|illustrate)\b/gi, ' ')
-    .replace(/\b(a|an|the|me|for me|open|microsoft|picture|image|drawing|painting|sketch|illustration|art|looks like|look like|in paint|with paint|microsoft paint|mspaint)\b/gi, ' ')
-    .replace(/\b(and|then|please|using|from|reference|references)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return subject || 'requested subject';
-}
-
-function visualSearchQuery(subject) {
-  return `what does ${subject} look like visual features reference`;
-}
-
-function sanitizePaintText(value, limit = 220) {
-  return String(value || '')
-    .replace(/[\r\n\t]+/g, ' ')
-    .replace(/[^\x20-\x7E]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, limit)
-    .replace(/'/g, "''");
-}
-
-function inferVisualTraits(subject, research) {
-  const text = `${subject} ${research?.answer || ''} ${(research?.related || []).map((r) => r.text).join(' ')}`.toLowerCase();
-  const traits = [];
-  if (/\b(rabbit|bunny|hare|bugs bunny)\b/.test(text)) traits.push('long ears', 'rounded muzzle', 'large eyes', 'soft grey/white body');
-  if (/\b(monkey|ape|chimp)\b/.test(text)) traits.push('round ears', 'tan face', 'brown fur', 'expressive grin');
-  if (/\b(car|vehicle|truck)\b/.test(text)) traits.push('wheels', 'windshield', 'body panels', 'road stance');
-  if (/\b(robot|android)\b/.test(text)) traits.push('metal body', 'screen eyes', 'jointed limbs', 'control panel');
-  if (/\bflower|rose|tulip\b/.test(text)) traits.push('stem', 'petals', 'leaves', 'bright center');
-  if (/\bhouse|building|home\b/.test(text)) traits.push('roof', 'windows', 'door', 'simple structure');
-  if (/\bdragon\b/.test(text)) traits.push('wings', 'horns', 'tail', 'scales');
-  if (/\bbird|eagle|falcon\b/.test(text)) traits.push('beak', 'wings', 'tail feathers', 'perched body');
-  if (!traits.length) traits.push('main silhouette', 'distinctive colors', 'recognizable features', 'clear outline');
-  return [...new Set(traits)].slice(0, 6);
-}
-
-async function actionCreateVisualInPaint(args = {}) {
-  requireActionConsent();
-  const subject = extractCreativeSubject(args.subject || args.prompt || args.caption || args.query || 'requested subject');
-  const exactCharacter = /\bbugs bunny\b/i.test(subject);
-  const query = visualSearchQuery(subject);
-  const research = await actionWebSearch({ query, open_browser: args.open_browser !== false });
-  const traits = inferVisualTraits(subject, research);
-  const artDir = safeMkdir(path.join(dataRoot, 'art'));
-  const stamp = Date.now();
-  const file = path.join(artDir, `paint-${slug(subject).slice(0, 44) || 'visual'}-${stamp}.png`);
-  const notesFile = path.join(artDir, `paint-${slug(subject).slice(0, 44) || 'visual'}-${stamp}-research.json`);
-  const scriptFile = path.join(safeMkdir(path.join(dataRoot, 'cache')), `create-visual-${process.pid}-${stamp}.ps1`);
-  const title = exactCharacter ? `Original cartoon rabbit inspired by researched traits` : `Original ${subject}`;
-  const safeSubject = sanitizePaintText(subject, 80);
-  const safeTitle = sanitizePaintText(title, 100);
-  const safeTraits = sanitizePaintText(traits.join(' | '), 180);
-  const safeSource = sanitizePaintText(research.url || research.source || 'web search', 140);
-  const script = [
-    'param([string]$OutFile, [string]$Subject, [string]$Title, [string]$Traits, [string]$Source)',
-    'Add-Type -AssemblyName System.Drawing',
-    '$bmp = New-Object System.Drawing.Bitmap 1100, 780',
-    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
-    '$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias',
-    '$g.FillRectangle([System.Drawing.Brushes]::White, 0, 0, 1100, 780)',
-    '$ink = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(30, 45, 39), 6)',
-    '$thin = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(30, 45, 39), 3)',
-    '$accent = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(112, 191, 146))',
-    '$soft = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(224, 239, 230))',
-    '$warm = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(245, 205, 126))',
-    '$dark = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(30, 45, 39))',
-    '$fontTitle = New-Object System.Drawing.Font "Segoe UI", 26, ([System.Drawing.FontStyle]::Bold)',
-    '$font = New-Object System.Drawing.Font "Segoe UI", 15, ([System.Drawing.FontStyle]::Regular)',
-    '$fontSmall = New-Object System.Drawing.Font "Consolas", 11, ([System.Drawing.FontStyle]::Regular)',
-    '$g.DrawString($Title, $fontTitle, $dark, 46, 34)',
-    '$g.DrawString(("Subject: " + $Subject), $font, $dark, 50, 86)',
-    '$g.DrawString(("Researched traits: " + $Traits), $fontSmall, $dark, 50, 690)',
-    '$g.DrawString(("Source/search: " + $Source), $fontSmall, $dark, 50, 718)',
-    '$lower = $Subject.ToLowerInvariant()',
-    'if ($lower -match "rabbit|bunny|hare|bugs bunny") {',
-    '  $g.FillEllipse($soft, 440, 160, 95, 260); $g.FillEllipse($soft, 585, 160, 95, 260)',
-    '  $g.FillEllipse($accent, 472, 205, 32, 170); $g.FillEllipse($accent, 618, 205, 32, 170)',
-    '  $g.FillEllipse($soft, 360, 350, 400, 280); $g.FillEllipse([System.Drawing.Brushes]::White, 445, 430, 70, 80); $g.FillEllipse([System.Drawing.Brushes]::White, 605, 430, 70, 80)',
-    '  $g.FillEllipse($dark, 475, 462, 18, 22); $g.FillEllipse($dark, 635, 462, 18, 22); $g.FillEllipse($warm, 540, 520, 48, 30)',
-    '  $g.DrawEllipse($ink, 360, 350, 400, 280); $g.DrawEllipse($thin, 440, 160, 95, 260); $g.DrawEllipse($thin, 585, 160, 95, 260)',
-    '} elseif ($lower -match "robot|android") {',
-    '  $g.FillRectangle($soft, 405, 245, 290, 255); $g.DrawRectangle($ink, 405, 245, 290, 255); $g.FillEllipse($accent, 465, 310, 55, 55); $g.FillEllipse($accent, 580, 310, 55, 55); $g.FillRectangle($warm, 500, 405, 100, 35); $g.DrawLine($thin, 550, 245, 550, 160); $g.FillEllipse($warm, 535, 132, 30, 30)',
-    '} elseif ($lower -match "car|vehicle|truck") {',
-    '  $g.FillRectangle($accent, 300, 380, 500, 135); $g.FillPolygon($soft, @([System.Drawing.Point]::new(405,380),[System.Drawing.Point]::new(485,300),[System.Drawing.Point]::new(650,300),[System.Drawing.Point]::new(730,380))); $g.DrawRectangle($ink, 300, 380, 500, 135); $g.FillEllipse($dark, 380, 485, 90, 90); $g.FillEllipse($dark, 635, 485, 90, 90)',
-    '} elseif ($lower -match "flower|rose|tulip") {',
-    '  $g.DrawLine((New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(60,130,85), 10)), 550, 610, 550, 380); for($i=0;$i -lt 10;$i++){ $ang=$i*36; $x=550+[math]::Cos($ang*[math]::PI/180)*80; $y=350+[math]::Sin($ang*[math]::PI/180)*55; $g.FillEllipse($accent, $x-45, $y-30, 90, 60) }; $g.FillEllipse($warm, 510, 315, 80, 80)',
-    '} else {',
-    '  $g.FillEllipse($soft, 360, 230, 380, 330); $g.DrawEllipse($ink, 360, 230, 380, 330); $g.FillEllipse($accent, 455, 330, 70, 70); $g.FillEllipse($accent, 585, 330, 70, 70); $g.DrawArc($thin, 485, 410, 130, 70, 15, 150); $g.DrawString("original visual draft", $font, $dark, 470, 585)',
-    '}',
-    '$bmp.Save($OutFile, [System.Drawing.Imaging.ImageFormat]::Png)',
-    '$g.Dispose(); $bmp.Dispose(); $ink.Dispose(); $thin.Dispose(); $accent.Dispose(); $soft.Dispose(); $warm.Dispose(); $dark.Dispose(); $fontTitle.Dispose(); $font.Dispose(); $fontSmall.Dispose()'
-  ].join(os.EOL);
-  writeJson(notesFile, { subject, query, exact_character_request: exactCharacter, copyright_note: exactCharacter ? 'Created as an original cartoon rabbit from high-level researched traits, not an exact character copy.' : '', traits, research, created_at: new Date().toISOString() });
-  fs.writeFileSync(scriptFile, script, 'utf8');
-  const drawn = await runCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, file, safeSubject, safeTitle, safeTraits, safeSource], 25000);
-  try { fs.unlinkSync(scriptFile); } catch {}
-  if (!drawn.ok || !fs.existsSync(file)) throw new Error(drawn.stderr || drawn.stdout || 'Visual creation failed.');
-  const opened = await startProcessDetached('mspaint.exe', [file]);
-  return { ...opened, app: 'Paint', file, notes_file: notesFile, bytes: fs.statSync(file).size, subject, query, traits, research_url: research.url, opened_reference: research.opened || null, safe_transform: exactCharacter };
+  const r = launchViaStart(url);
+  return { ...r, browser: 'default', url };
 }
 
 function sandboxFilePath(relpath) {
@@ -767,6 +626,32 @@ async function actionShellRun(args = {}) {
   return runCommand(command, [], Number(args.timeout || 15000));
 }
 
+async function actionCmdRun(args = {}) {
+  requireActionConsent();
+  const command = String(args.command || args.cmd || '').trim();
+  if (!command) throw new Error('command is required.');
+  const list = Array.isArray(args.args) ? args.args.map(String) : [];
+  const timeout = Number(args.timeout || 60000);
+  // Full native CLI control, gated only by the session Allow-actions consent.
+  // Run through the shell so pipelines and built-ins work like a real terminal.
+  if (list.length) return runCommand(command, list, timeout);
+  return new Promise((resolve) => {
+    const shell = process.platform === 'win32' ? 'cmd.exe' : 'bash';
+    const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-lc', command];
+    execFile(shell, shellArgs, { windowsHide: true, timeout, cwd: args.cwd && exists(args.cwd) ? args.cwd : dataRoot, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      resolve({
+        ok: !err,
+        command,
+        code: err && typeof err.code === 'number' ? err.code : 0,
+        stdout: String(stdout || '').slice(0, 12000),
+        stderr: String(stderr || err?.message || '').slice(0, 12000)
+      });
+    });
+  });
+}
+
+const SENSITIVE_TOOLS = ['shell_run', 'cmd_run', 'file_write', 'screenshot', 'open_app', 'open_url'];
+
 async function callLocalTool(name, args = {}) {
   const toolName = String(name || args.name || args.tool || '').trim();
   if (!toolName) throw new Error('tool name is required');
@@ -774,10 +659,26 @@ async function callLocalTool(name, args = {}) {
   const isTool = (...names) => names.map(slug).includes(key);
   const body = args || {};
 
+  // Permission gate: sensitive tools require consent
+  const settings = readJson(settingsPath(), {});
+  const requireConsent = settings.require_consent !== false;
+  const autoGrant = settings.auto_grant_actions === true;
+  if (requireConsent && !autoGrant && SENSITIVE_TOOLS.some(t => slug(t) === key)) {
+    if (!body._permitted) {
+      return {
+        ok: false,
+        tool: toolName,
+        action_required: true,
+        reason: `The tool \`${toolName}\` requires your permission to run.`,
+        prompt: `⚠️ **Permission Required**: Run \`${toolName}\`?\nType \`/allow-actions\` to grant permission, or \`/deny\` to reject.`
+      };
+    }
+  }
+
   if (isTool('abuz8_chat', 'chat')) {
     const prompt = body.message || body.content || body.prompt || body.raw || '';
-    const response = await embeddedReply(prompt) || localReply(prompt);
-    return { ok: true, tool: toolName, result: { response, brain: embeddedBrainStatus(), fallback: !lfmProcess } };
+    const r = await reasonReply(prompt);
+    return { ok: true, tool: toolName, result: { response: r.text, brain: embeddedBrainStatus(), answered_by: r.brain, fallback: r.fallback } };
   }
   if (isTool('abuz8_device_probe', 'device_probe', 'hardware_probe')) {
     return { ok: true, tool: toolName, result: await machineProbe() };
@@ -813,9 +714,6 @@ async function callLocalTool(name, args = {}) {
     const board = readMissionBoard();
     return { ok: true, tool: toolName, result: { ...board, summary: missionSummary(board) } };
   }
-  if (isTool('abuz8_mission_auto_probe', 'mission_auto_probe', 'auto_probe')) {
-    return { ok: true, tool: toolName, result: await autoProbeDevice() };
-  }
   if (isTool('abuz8_mission_task_create', 'mission_task_create')) {
     const task = upsertMissionTask(body);
     return { ok: true, tool: toolName, result: { task, board: readMissionBoard() } };
@@ -827,20 +725,11 @@ async function callLocalTool(name, args = {}) {
   if (isTool('open_url')) {
     return { ok: true, tool: toolName, result: await actionOpenUrl(body) };
   }
-  if (isTool('web_search', 'search_web', 'internet_search')) {
-    return { ok: true, tool: toolName, result: await actionWebSearch(body) };
-  }
   if (isTool('open_app')) {
     return { ok: true, tool: toolName, result: await actionOpenApp(body) };
   }
-  if (isTool('create_visual_in_paint', 'research_create_visual', 'paint_visual')) {
-    return { ok: true, tool: toolName, result: await actionCreateVisualInPaint(body) };
-  }
   if (isTool('draw_monkey_in_paint', 'paint_monkey', 'draw_monkey')) {
     return { ok: true, tool: toolName, result: await actionDrawMonkeyInPaint(body) };
-  }
-  if (isTool('draw_cartoon_rabbit_in_paint', 'paint_rabbit', 'draw_rabbit')) {
-    return { ok: true, tool: toolName, result: await actionCreateVisualInPaint({ ...body, subject: body.subject || body.caption || 'cartoon rabbit', open_browser: true }) };
   }
   if (isTool('screenshot')) {
     return { ok: true, tool: toolName, result: await actionScreenshot(body) };
@@ -850,6 +739,37 @@ async function callLocalTool(name, args = {}) {
   }
   if (isTool('shell_run')) {
     return { ok: true, tool: toolName, result: await actionShellRun(body) };
+  }
+  if (isTool('mcp_call')) {
+    // Two-way bridge: the agent drives any registered MCP server (Desktop
+    // Commander, Windows-MCP mouse/keyboard, Antigravity, …). Consent-gated —
+    // these are real OS-control tools.
+    requireActionConsent();
+    const mcpServer = String(body.server || '').trim();
+    const mcpTool = String(body.tool || body.name || '').trim();
+    if (!mcpServer || !mcpTool) throw new Error('mcp_call requires {"server":"...","tool":"...","args":{}}. List servers at /api/mcp/servers.');
+    return { ok: true, tool: 'mcp_call', server: mcpServer, mcp_tool: mcpTool, result: await mcpCallTool(mcpServer, mcpTool, body.args || {}) };
+  }
+  if (isTool('cmd_run', 'run_command', 'terminal')) {
+    return { ok: true, tool: toolName, result: await actionCmdRun(body) };
+  }
+  if (isTool('swarm_run', 'swarm')) {
+    return { ok: true, tool: toolName, result: await runSwarm(body.task || body.goal || body.content, body.roles || body.agents) };
+  }
+  if (isTool('content_generate', 'generate_content')) {
+    return { ok: true, tool: toolName, result: await generateContent(body) };
+  }
+  if (isTool('x_post', 'post_to_x', 'tweet')) {
+    return { ok: true, tool: toolName, result: await xPost(body) };
+  }
+  if (isTool('browser_do', 'browser', 'web_automate')) {
+    return { ok: true, tool: toolName, result: await browserDo(body) };
+  }
+  if (isTool('gui_do', 'desktop_control', 'mouse_keyboard')) {
+    return { ok: true, tool: toolName, result: await guiDo(body) };
+  }
+  if (isTool('web_search')) {
+    return { ok: true, tool: toolName, result: await webSearch(body) };
   }
   if (isTool('cli_probe', 'abuz8_cli_probe')) {
     if (!body.allow_cli) throw new Error('allow_cli must be true before executing a local CLI command.');
@@ -935,27 +855,294 @@ function splitPath(reqUrl) {
   return { pathname: u.pathname.replace(/\/+$/, '') || '/', searchParams: u.searchParams };
 }
 
-function voiceProfiles(voices = []) {
-  const lower = (v) => String(v || '').toLowerCase();
-  const male = voices.find((v) => /guy|david|mark|george|james|daniel|male/i.test(v)) || voices.find(Boolean) || '';
-  const female = voices.find((v) => /zira|jenny|aria|susan|eva|hazel|samantha|female/i.test(v)) || voices.find(Boolean) || '';
+// ── Attachments: optional engines that make ABUZ8 more capable. It runs without
+// any of them; each detected one upgrades a capability (voice, hearing, etc.). ──
+function attachmentsDir() { return safeMkdir(path.join(dataRoot, 'attachments')); }
+
+function piperPaths() {
+  const root = path.join(attachmentsDir(), 'piper');
+  return { root, exe: path.join(root, 'piper.exe'), voicesDir: path.join(root, 'voices') };
+}
+function piperAvailable() { return exists(piperPaths().exe); }
+
+function listPiperVoices() {
+  const { voicesDir } = piperPaths();
+  if (!exists(voicesDir)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(voicesDir)) {
+    if (!f.endsWith('.onnx')) continue;
+    const id = f.replace(/\.onnx$/, '');
+    const parts = id.split('-'); // lang_REGION-name-quality
+    const lang = (parts[0] || '').split('_')[0];
+    out.push({
+      id,
+      name: prettyVoiceName(id),
+      lang,
+      engine: 'piper',
+      file: path.join(voicesDir, f),
+      arabic: lang === 'ar'
+    });
+  }
+  return out;
+}
+function prettyVoiceName(id) {
+  const map = {
+    'en_US-hfc_female-medium': 'Aria (US female, natural)',
+    'en_US-ryan-high': 'Ryan (US male, hi-fi)',
+    'en_GB-alan-medium': 'Alan (British male)',
+    'ar_JO-kareem-medium': 'Kareem (Arabic / عربي)'
+  };
+  return map[id] || id.replace(/_/g, ' ');
+}
+
+// Neural TTS via Piper. Optional preset shapes the delivery (e.g. "cartoon" =
+// faster + higher pitch via length_scale; "calm" = slower).
+function synthesizePiper(textValue, voiceId, preset) {
+  return new Promise((resolve, reject) => {
+    const { exe, voicesDir } = piperPaths();
+    if (!exists(exe)) return reject(new Error('Piper attachment not installed.'));
+    const voices = listPiperVoices();
+    const voice = voices.find((v) => v.id === voiceId) || voices.find((v) => v.lang === 'en') || voices[0];
+    if (!voice) return reject(new Error('No Piper voice installed.'));
+    const textClean = String(textValue || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
+    if (!textClean) return reject(new Error('No text supplied.'));
+    const ttsDir = safeMkdir(path.join(dataRoot, 'cache', 'tts'));
+    const outputFile = path.join(ttsDir, `${Date.now()}-${crypto.randomBytes(3).toString('hex')}.wav`);
+    // length_scale: <1 faster/brighter, >1 slower. cartoon = fast+light.
+    const presets = { normal: ['--length_scale', '1.0'], calm: ['--length_scale', '1.18'], fast: ['--length_scale', '0.82'], cartoon: ['--length_scale', '0.72', '--noise_w', '0.95'], narrator: ['--length_scale', '1.08'] };
+    const extra = presets[slug(preset || 'normal')] || presets.normal;
+    const args = ['-m', voice.file, '-f', outputFile, ...extra];
+    const child = execFile(exe, args, { cwd: piperPaths().root, windowsHide: true, timeout: 45000 }, (err) => {
+      if (err && !exists(outputFile)) return reject(err);
+      try {
+        const wav = fs.readFileSync(outputFile);
+        try { fs.unlinkSync(outputFile); } catch {}
+        resolve({ wav, voice: voice.id, engine: 'piper' });
+      } catch (e) { reject(e); }
+    });
+    child.stdin.write(textClean);
+    child.stdin.end();
+  });
+}
+
+function attachmentsStatus() {
+  const piper = piperAvailable();
+  const voices = piper ? listPiperVoices() : [];
+  return {
+    ok: true,
+    attachments: [
+      { id: 'piper-tts', name: 'Piper Neural Voice', capability: 'Text-to-speech (offline, natural)', installed: piper, detail: piper ? `${voices.length} voice(s): ${voices.map((v) => v.name).join(', ')}` : 'Not installed — falls back to Windows SAPI.' },
+      { id: 'whisper-stt', name: 'Whisper Hearing', capability: 'Speech-to-text (offline)', installed: whisperAvailable(), detail: whisperAvailable() ? 'Offline transcription ready.' : 'Not installed — falls back to browser/Windows STT.' },
+      { id: 'lora-adapters', name: 'LoRA Specialist Brains', capability: 'Modular skill adapters on the local brain', installed: listLoraAdapters().length > 0, detail: listLoraAdapters().length ? `${listLoraAdapters().length} adapter(s) available.` : 'Drop .gguf LoRA files in attachments/lora to specialize the brain.' },
+      { id: 'playwright', name: 'Playwright Browser Control', capability: 'Real browser automation (navigate/click/fill/extract)', installed: browserAutomationAvailable(), detail: browserAutomationAvailable() ? 'Headless/headed Chromium automation ready.' : 'Not installed — npm i playwright in attachments/playwright.' },
+      { id: 'pyautogui', name: 'PyAutoGUI Desktop Control', capability: 'Real mouse/keyboard/screen control', installed: guiAutomationAvailable(), detail: guiAutomationAvailable() ? 'Native desktop control ready (consent-gated).' : 'Not installed — pip install pyautogui.' }
+    ],
+    voice_engine: piper ? 'piper' : 'windows-sapi',
+    voices: [...voices, ...[]]
+  };
+}
+
+// ── Playwright browser automation (real, headed or headless) ──
+function playwrightPaths() {
+  const root = path.join(attachmentsDir(), 'playwright');
+  return { root, runner: path.join(root, 'run.js'), node: bundledNodePath() || 'node', hasModule: exists(path.join(root, 'node_modules', 'playwright')) };
+}
+function browserAutomationAvailable() { const p = playwrightPaths(); return exists(p.runner) && p.hasModule; }
+
+async function browserDo(args = {}) {
+  const p = playwrightPaths();
+  if (!browserAutomationAvailable()) throw new Error('Playwright attachment not installed (attachments/playwright).');
+  const spec = {
+    url: args.url ? (resolveSiteUrl(args.url, args.search) || (/^https?:/i.test(args.url) ? args.url : 'https://' + args.url)) : undefined,
+    headless: args.headless !== false && args.show !== true,
+    actions: Array.isArray(args.actions) ? args.actions : [],
+    extract: args.extract !== false,
+    screenshot: args.screenshot ? path.join(safeMkdir(path.join(dataRoot, 'shots')), `browser-${Date.now()}.png`) : undefined
+  };
+  const specFile = path.join(safeMkdir(path.join(dataRoot, 'cache')), `pw-${process.pid}-${Date.now()}.json`);
+  fs.writeFileSync(specFile, JSON.stringify(spec), 'utf8');
+  return new Promise((resolve, reject) => {
+    execFile(p.node, [p.runner, specFile], { cwd: p.root, windowsHide: true, timeout: 90000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      try { fs.unlinkSync(specFile); } catch {}
+      if (err && !stdout) return reject(new Error(err.message));
+      try { resolve(JSON.parse(stdout)); } catch { reject(new Error('browser runner returned no JSON: ' + String(stdout).slice(0, 200))); }
+    });
+  });
+}
+
+// ── PyAutoGUI desktop automation (real mouse/keyboard/screen) ──
+function pyautoguiPaths() {
+  const root = path.join(attachmentsDir(), 'pyautogui');
+  return { root, runner: path.join(root, 'gui.py') };
+}
+function guiAutomationAvailable() { return exists(pyautoguiPaths().runner); }
+
+async function guiDo(args = {}) {
+  requireActionConsent(); // controls the real machine — always gated
+  const p = pyautoguiPaths();
+  if (!guiAutomationAvailable()) throw new Error('PyAutoGUI attachment not installed (attachments/pyautogui).');
+  if (args.action === 'screenshot' && !args.path) args.path = path.join(safeMkdir(path.join(dataRoot, 'shots')), `gui-${Date.now()}.png`);
+  return new Promise((resolve, reject) => {
+    execFile('python', [p.runner, JSON.stringify(args)], { windowsHide: true, timeout: 30000 }, (err, stdout) => {
+      if (err && !stdout) return reject(new Error(err.message));
+      try { resolve(JSON.parse(stdout)); } catch { reject(new Error('gui runner returned no JSON: ' + String(stdout).slice(0, 200))); }
+    });
+  });
+}
+
+function listLoraAdapters() {
+  const dir = path.join(attachmentsDir(), 'lora');
+  if (!exists(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => /\.gguf$/i.test(f)).map((f) => ({ id: f.replace(/\.gguf$/i, ''), file: path.join(dir, f) }));
+}
+
+function whisperPaths() {
+  const root = path.join(attachmentsDir(), 'whisper');
+  const exe = ['whisper-cli.exe', 'main.exe', 'whisper.exe'].map((n) => path.join(root, n)).find((p) => exists(p));
+  const model = exists(path.join(root, 'models')) ? fs.readdirSync(path.join(root, 'models')).find((f) => /\.bin$/i.test(f)) : null;
+  return { root, exe: exe || path.join(root, 'whisper-cli.exe'), model: model ? path.join(root, 'models', model) : null };
+}
+function whisperAvailable() { const w = whisperPaths(); return exists(w.exe) && Boolean(w.model); }
+
+function transcribeWhisper(wavBase64) {
+  return new Promise((resolve, reject) => {
+    const w = whisperPaths();
+    if (!whisperAvailable()) return reject(new Error('Whisper attachment not installed.'));
+    const b64 = String(wavBase64 || '').replace(/^data:audio\/\w+;base64,/, '').trim();
+    if (!b64) return reject(new Error('No audio supplied.'));
+    const sttDir = safeMkdir(path.join(dataRoot, 'cache', 'stt'));
+    const inFile = path.join(sttDir, `${Date.now()}-${crypto.randomBytes(3).toString('hex')}.wav`);
+    fs.writeFileSync(inFile, Buffer.from(b64, 'base64'));
+    execFile(w.exe, ['-m', w.model, '-f', inFile, '-otxt', '-of', inFile, '-nt'], { windowsHide: true, timeout: 60000 }, (err) => {
+      const txtFile = inFile + '.txt';
+      let transcript = '';
+      try { transcript = fs.readFileSync(txtFile, 'utf8').trim(); } catch {}
+      try { fs.unlinkSync(inFile); } catch {}
+      try { fs.unlinkSync(txtFile); } catch {}
+      if (err && !transcript) return reject(err);
+      resolve({ transcript, engine: 'whisper.cpp' });
+    });
+  });
+}
+
+// ── Voice sidecar — native GPU STT (Whisper large-v3) + TTS (Kokoro-82M) ────
+// A resident Python service on :8921 the core auto-detects and auto-spawns,
+// exactly like external model runners. Preferred over Piper/Windows/browser.
+const VOICE_SIDECAR_PORT = Number(process.env.ABUZ8_VOICE_PORT || 8921);
+let voiceSidecarCache = { at: 0, health: null };
+let voiceSidecarSpawned = false;
+async function voiceSidecarHealth(force) {
+  if (!force && Date.now() - voiceSidecarCache.at < 5000) return voiceSidecarCache.health;
+  try {
+    const txt = await fetchUrl(`http://127.0.0.1:${VOICE_SIDECAR_PORT}/health`, { timeout: 1500 });
+    voiceSidecarCache = { at: Date.now(), health: JSON.parse(txt) };
+  } catch { voiceSidecarCache = { at: Date.now(), health: null }; }
+  return voiceSidecarCache.health;
+}
+function voiceSidecarScript() {
   return [
-    { id: 'auto', label: 'Auto', voice: '', rate: 0, pitch: 1, description: 'Use the system default voice.' },
-    { id: 'male', label: 'Man', voice: male, rate: -1, pitch: 0.95, description: 'Lower, calmer local voice when available.' },
-    { id: 'female', label: 'Woman', voice: female, rate: 0, pitch: 1.05, description: 'Clearer local voice when available.' },
-    { id: 'cartoon', label: 'Cartoon', voice: female || male, rate: 3, pitch: 1.22, description: 'Playful cartoon-style voice profile; not an imitation of a real performer or protected character.' }
-  ].map((p) => ({ ...p, voice_available: !p.voice || voices.some((v) => lower(v) === lower(p.voice)) }));
+    path.join(__dirname, 'voice', 'voice_sidecar.py'),
+    path.join(process.resourcesPath || '', 'voice', 'voice_sidecar.py')
+  ].find((p) => p && exists(p)) || null;
+}
+async function ensureVoiceSidecar() {
+  const h = await voiceSidecarHealth();
+  if (h && h.ok) return h;
+  if (voiceSidecarSpawned) return null;
+  const script = voiceSidecarScript();
+  if (!script) return null;
+  const python = ['C:\\Program Files\\Python311\\python.exe', 'C:\\Python311\\python.exe']
+    .find((p) => exists(p)) || 'python';
+  try {
+    const proc = spawn(python, [script], {
+      env: { ...process.env, ABUZ8_VOICE_PORT: String(VOICE_SIDECAR_PORT) },
+      detached: true, stdio: 'ignore', windowsHide: true
+    });
+    proc.unref();
+    voiceSidecarSpawned = true;
+    // Fire-and-forget warmup so first real call is instant.
+    setTimeout(() => {
+      fetchUrl(`http://127.0.0.1:${VOICE_SIDECAR_PORT}/warmup`, { method: 'POST', timeout: 300000 }).catch(() => {});
+    }, 5000);
+    logFn(`[voice] sidecar spawning via ${python} (${script})`);
+  } catch (e) { logFn(`[voice] sidecar spawn failed: ${e.message}`); }
+  return null;
+}
+function httpPostBuffer(url, bodyObj, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json' } }, (r) => {
+      const chunks = [];
+      r.on('data', (c) => chunks.push(c));
+      r.on('end', () => resolve({ status: r.statusCode, buffer: Buffer.concat(chunks), headers: r.headers }));
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('voice sidecar timeout')));
+    req.end(JSON.stringify(bodyObj));
+  });
 }
 
-function resolveVoiceProfile(input, voices = []) {
-  const wanted = String(input || '').trim();
-  const profiles = voiceProfiles(voices);
-  const profile = profiles.find((p) => p.id === slug(wanted) || p.label.toLowerCase() === wanted.toLowerCase());
-  if (profile) return profile;
-  return { id: 'custom', label: wanted || 'Auto', voice: wanted, rate: 0, pitch: 1, description: 'Custom installed Windows voice.' };
+// ── Internet tunnel (cloudflared) — phone/PWA reachable over the internet ──
+let tunnelProc = null;
+let tunnelUrl = '';
+function cloudflaredPath() {
+  return [
+    'C:\\Program Files (x86)\\cloudflared\\cloudflared.exe',
+    'C:\\Program Files\\cloudflared\\cloudflared.exe'
+  ].find((p) => exists(p)) || 'cloudflared';
+}
+function startTunnel() {
+  return new Promise((resolve, reject) => {
+    if (tunnelProc && tunnelUrl) return resolve(tunnelUrl);
+    const proc = spawn(cloudflaredPath(), ['tunnel', '--url', `http://127.0.0.1:${PORT}`], { windowsHide: true });
+    tunnelProc = proc;
+    let buf = '';
+    const onData = (d) => {
+      buf += d.toString();
+      const m = buf.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+      if (m && !tunnelUrl) { tunnelUrl = m[0]; logFn(`[tunnel] live at ${tunnelUrl}`); resolve(tunnelUrl); }
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    proc.on('exit', () => { tunnelProc = null; tunnelUrl = ''; });
+    proc.on('error', (e) => { tunnelProc = null; reject(e); });
+    setTimeout(() => { if (!tunnelUrl) reject(new Error('cloudflared did not report a URL within 30s')); }, 30000);
+  });
+}
+function stopTunnel() {
+  try { tunnelProc && tunnelProc.kill(); } catch {}
+  tunnelProc = null; tunnelUrl = '';
 }
 
-function synthesizeWindowsTts(textValue, voiceName = '', voiceProfile = '') {
+// ── Telephony (Twilio) — the OS's own real phone number, two-way SMS ───────
+function twilioCreds() {
+  const s = readJson(settingsPath(), {});
+  return {
+    sid: s.twilio_account_sid || process.env.TWILIO_ACCOUNT_SID || '',
+    token: s.twilio_auth_token || process.env.TWILIO_AUTH_TOKEN || '',
+    from: s.twilio_from || process.env.TWILIO_FROM || ''
+  };
+}
+function escapeXml(s) {
+  return String(s || '').replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+}
+async function twilioSendSms(to, text) {
+  const { sid, token, from } = twilioCreds();
+  if (!sid || !token || !from) throw new Error('Twilio is not configured. Set twilio_account_sid, twilio_auth_token, twilio_from in Settings.');
+  const params = new URLSearchParams({ To: to, From: from, Body: String(text || '').slice(0, 1500) });
+  const resp = await fetchUrl(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: params.toString(),
+    timeout: 20000
+  });
+  return JSON.parse(resp);
+}
+
+function synthesizeWindowsTts(textValue, voiceName = '') {
   return new Promise((resolve, reject) => {
     if (process.platform !== 'win32') return reject(new Error('Native TTS is only bundled for Windows in this build.'));
     const textClean = String(textValue || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
@@ -964,40 +1151,30 @@ function synthesizeWindowsTts(textValue, voiceName = '', voiceProfile = '') {
     const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const inputFile = path.join(ttsDir, `${id}.txt`);
     const outputFile = path.join(ttsDir, `${id}.wav`);
-    const scriptFile = path.join(ttsDir, `${id}.ps1`);
-    listWindowsTtsVoices().then((voices) => {
-      const profile = resolveVoiceProfile(voiceProfile || voiceName || '', voices);
-      const finalVoice = voiceName && !['auto', 'male', 'female', 'cartoon'].includes(slug(voiceName)) ? voiceName : profile.voice;
-      const rate = Number.isFinite(profile.rate) ? profile.rate : 0;
-      const textForVoice = profile.id === 'cartoon'
-        ? textClean.replace(/\bhello\b/ig, 'well hello').replace(/[.]{1,}/g, '!')
-        : textClean;
-      fs.writeFileSync(inputFile, textForVoice, 'utf8');
-      const scriptBody = [
-        'param([string]$InputFile,[string]$OutputFile,[string]$VoiceName,[int]$Rate)',
-        'Add-Type -AssemblyName System.Speech',
-        '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
-        'if ($VoiceName) { try { $synth.SelectVoice($VoiceName) } catch {} }',
-        '$synth.Rate = $Rate',
-        '$synth.Volume = 100',
-        '$synth.SetOutputToWaveFile($OutputFile)',
-        '$synth.Speak([IO.File]::ReadAllText($InputFile))',
-        '$synth.Dispose()'
-      ].join(os.EOL);
-      fs.writeFileSync(scriptFile, scriptBody, 'utf8');
-      execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptFile, inputFile, outputFile, String(finalVoice || ''), String(rate)], { windowsHide: true, timeout: 30000 }, (err) => {
-        try { fs.unlinkSync(inputFile); } catch {}
-        try { fs.unlinkSync(scriptFile); } catch {}
-        if (err) return reject(err);
-        try {
-          const wav = fs.readFileSync(outputFile);
-          try { fs.unlinkSync(outputFile); } catch {}
-          resolve(wav);
-        } catch (e) {
-          reject(e);
-        }
-      });
-    }).catch(reject);
+    fs.writeFileSync(inputFile, textClean, 'utf8');
+    const scriptBody = [
+      'param([string]$InputFile,[string]$OutputFile,[string]$VoiceName)',
+      'Add-Type -AssemblyName System.Speech',
+      '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+      'if ($VoiceName) { try { $synth.SelectVoice($VoiceName) } catch {} }',
+      '$synth.Rate = 0',
+      '$synth.Volume = 100',
+      '$synth.SetOutputToWaveFile($OutputFile)',
+      '$synth.Speak([IO.File]::ReadAllText($InputFile))',
+      '$synth.Dispose()'
+    ].join('; ');
+    const script = `& { ${scriptBody} }`;
+    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, inputFile, outputFile, String(voiceName || '')], { windowsHide: true, timeout: 30000 }, (err) => {
+      try { fs.unlinkSync(inputFile); } catch {}
+      if (err) return reject(err);
+      try {
+        const wav = fs.readFileSync(outputFile);
+        try { fs.unlinkSync(outputFile); } catch {}
+        resolve(wav);
+      } catch (e) {
+        reject(e);
+      }
+    });
   });
 }
 
@@ -1138,6 +1315,11 @@ function persistentClaudeBridge() {
 
 function installClaudeSymbiote() {
   const file = claudeConfigPath();
+  // Never let a disposable/test data root (under %TEMP%) poison Claude Desktop's
+  // config with bridge paths that vanish when the temp dir is cleaned.
+  if (String(dataRoot || '').toLowerCase().startsWith(os.tmpdir().toLowerCase())) {
+    return { file, server: null, skipped: 'temp-data-root' };
+  }
   const cfg = readJson(file, { mcpServers: {} });
   cfg.mcpServers = cfg.mcpServers || {};
   const bridge = persistentClaudeBridge();
@@ -1280,20 +1462,38 @@ function stopEmbeddedBrain() {
   lfmStarting = false;
 }
 
+function clearExternalBrain(patch = {}) {
+  return { ...patch, selected_external_id: '', selected_external_backend: '', selected_external_endpoint: '', selected_external_model: '' };
+}
 function setActiveBrain(requested) {
-  const key = String(requested || '').trim().toLowerCase();
+  const raw = String(requested || '').trim();
+  const key = raw.toLowerCase();
   if (!key || key === 'auto') {
-    writeRuntimeConfigPatch({ selected_brain: 'auto', selected_brain_name: 'Auto' });
+    writeRuntimeConfigPatch(clearExternalBrain({ selected_brain: 'auto', selected_brain_name: 'Auto' }));
     stopEmbeddedBrain();
     activeBrain = selectEmbeddedBrain();
     return { ok: true, selected: embeddedBrainStatus(), restarted: true };
+  }
+  // Live external/GPU backend brain: ollama: / lmstudio: / vllm: / llamacpp:
+  const m = raw.match(/^(ollama|lmstudio|vllm|llamacpp):(.+)$/i);
+  if (m) {
+    const backend = m[1].toLowerCase();
+    const model = m[2];
+    const endpoint = backend === 'ollama' ? 'http://127.0.0.1:11434/v1'
+      : backend === 'lmstudio' ? 'http://127.0.0.1:1234/v1'
+      : backend === 'vllm' ? 'http://127.0.0.1:8000/v1'
+      : 'http://127.0.0.1:8080/v1';
+    writeRuntimeConfigPatch({ selected_brain: raw, selected_brain_name: `${backend} · ${model}`, selected_external_id: raw, selected_external_backend: backend, selected_external_endpoint: endpoint, selected_external_model: model });
+    stopEmbeddedBrain();
+    activeBrain = null;
+    return { ok: true, selected: { id: raw, name: `${backend} · ${model}`, kind: `gpu-${backend}`, endpoint, status: 'ready', external: true, available: embeddedBrainStatus().available }, restarted: true };
   }
   const brain = availableEmbeddedBrains().find((b) =>
     [b.id, b.tier, b.name.toLowerCase(), b.model_file.toLowerCase()].includes(key)
   );
   if (!brain) throw new Error(`Unknown brain: ${requested}`);
   if (!brain.embedded) throw new Error(`Brain is not bundled in this build: ${brain.name}`);
-  writeRuntimeConfigPatch({ selected_brain: brain.id, selected_brain_name: brain.name, selected_brain_tier: brain.tier });
+  writeRuntimeConfigPatch(clearExternalBrain({ selected_brain: brain.id, selected_brain_name: brain.name, selected_brain_tier: brain.tier }));
   stopEmbeddedBrain();
   activeBrain = brain;
   return { ok: true, selected: embeddedBrainStatus(), restarted: true };
@@ -1353,22 +1553,31 @@ function httpJson(method, port, pathname, body, timeoutMs = 20000) {
   });
 }
 
-async function waitForLfm(ms = 45000) {
+function lfmHealthy(timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const req = http.get({ hostname: '127.0.0.1', port: LFM_PORT, path: '/health', timeout: timeoutMs }, (res) => {
+      res.resume();
+      // llama-server answers 503 while the model is still loading; only 200 means ready.
+      resolve(res.statusCode === 200);
+    });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+  });
+}
+
+async function waitForLfm(ms = 150000) {
   const started = Date.now();
   while (Date.now() - started < ms) {
-    try {
-      await httpJson('GET', LFM_PORT, '/health', null, 2000);
-      return true;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 700));
-    }
+    if (await lfmHealthy()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 700));
   }
   return false;
 }
 
 async function ensureEmbeddedBrain() {
-  if (lfmProcess) return true;
-  if (lfmStarting) return waitForLfm(20000);
+  if (lfmProcess && await lfmHealthy()) return true;
+  if (lfmProcess) return waitForLfm(150000);
+  if (lfmStarting) return waitForLfm(150000);
   const files = brainRuntimeFiles();
   const selected = selectEmbeddedBrain();
   if (!exists(files.server) || !selected || !exists(selected.model)) {
@@ -1378,12 +1587,14 @@ async function ensureEmbeddedBrain() {
   activeBrain = selected;
   lfmStarting = true;
   lastLfmError = '';
+  const ngl = await detectGpuLayers();
+  if (ngl !== '0') logFn(`embedded brain: GPU offload enabled (-ngl ${ngl}).`);
   const args = [
     '-m', selected.model,
     '--host', '127.0.0.1',
     '--port', String(LFM_PORT),
     '-c', String(selected.context || 2048),
-    '-ngl', '0',
+    '-ngl', String(ngl),
     '--threads', String(Math.max(2, Math.min(8, os.cpus().length || 4)))
   ];
   try {
@@ -1413,203 +1624,28 @@ async function ensureEmbeddedBrain() {
   }
 }
 
-// ===== Jarvis multi-brain pool helpers (Step 1) =====
-
-function brainPoolModelPath(tier) {
-  const files = brainRuntimeFiles();
-  const candidates = [
-    path.join(files.dir, BRAIN_POOL_FILES[tier]),
-    path.join(__dirname, '.brain-shelf', BRAIN_POOL_FILES[tier])
-  ];
-  return candidates.find((p) => exists(p)) || null;
-}
-
-async function probeBrainAlive(port) {
-  try {
-    await httpJson('GET', port, '/health', null, 1500);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function startBrainTier(tier) {
-  const port = BRAIN_POOL_PORTS[tier];
-  const file = BRAIN_POOL_FILES[tier];
-  const model = brainPoolModelPath(tier);
-  const files = brainRuntimeFiles();
-  if (!model || !exists(files.server)) {
-    return { tier, port, file, process: null, alive: false, lastError: 'model or runtime missing' };
-  }
-  // If legacy single-brain holds this port with the same file, mark it as part of the pool instead of double-spawning
-  if (lfmProcess && BRAIN_POOL_PORTS[tier] === LFM_PORT) {
-    const aliveLegacy = await probeBrainAlive(port);
-    if (aliveLegacy) {
-      return { tier, port, file, process: lfmProcess, alive: true, lastError: '', legacy: true };
-    }
-  }
-  // EBUSY guard: if file is currently mmap'd by selected brain at LFM_PORT, skip this tier
-  if (lfmProcess && activeBrain && String(activeBrain.model_file || '').toLowerCase() === file.toLowerCase()) {
-    logFn(`[brain-pool] tier=${tier} skipped (GGUF already held by selected brain at port ${LFM_PORT})`);
-    return { tier, port, file, process: null, alive: false, lastError: 'GGUF held by selected brain', legacy: true };
-  }
-  const args = [
-    '-m', model,
-    '--host', '127.0.0.1',
-    '--port', String(port),
-    '-c', '2048',
-    '-ngl', '0',
-    '--threads', String(Math.max(2, Math.min(6, os.cpus().length || 4)))
-  ];
-  try {
-    logFn(`[brain-pool] spawn ${tier} port=${port} file=${file}`);
-    const proc = spawn(files.server, args, {
-      cwd: files.dir,
-      windowsHide: true,
-      stdio: ['ignore', 'ignore', 'pipe'],
-      shell: false
-    });
-    const entry = { tier, port, file, process: proc, alive: false, lastError: '' };
-    proc.on('error', (e) => { entry.lastError = e.message; entry.alive = false; logFn(`[brain-pool] ${tier} error: ${e.message}`); });
-    proc.on('exit', (code, sig) => { entry.lastError = `exit code=${code} sig=${sig}`; entry.alive = false; logFn(`[brain-pool] ${tier} exit code=${code}`); });
-    if (proc.stderr) {
-      proc.stderr.on('data', (d) => { const s = String(d).trim(); if (s) entry.lastError = s.slice(-300); });
-    }
-    return entry;
-  } catch (e) {
-    logFn(`[brain-pool] spawn ${tier} FAIL: ${e.message}`);
-    return { tier, port, file, process: null, alive: false, lastError: e.message };
-  }
-}
-
-async function startBrainPool(strategy = 'auto') {
-  if (brainPoolStarting) return brainPool;
-  brainPoolStarting = true;
-  try {
-    // Hardware-aware tier selection
-    const ramGb = Math.round(os.totalmem() / (1024 * 1024 * 1024));
-    const cpuCount = os.cpus().length || 1;
-    let tiers = ['lite', 'standard', 'pro'];
-    if (strategy === 'lite-only' || ramGb < 8) {
-      tiers = ['lite'];
-    } else if (strategy === 'lazy' || ramGb < 16) {
-      tiers = ['lite']; // start with lite; Standard/Pro can be added on demand
-    } else if (cpuCount < 4) {
-      tiers = ['lite'];
-    }
-    logFn(`[brain-pool] starting tiers=[${tiers.join(',')}] ram=${ramGb}GB cpu=${cpuCount}`);
-    const entries = [];
-    for (const tier of tiers) {
-      const e = await startBrainTier(tier);
-      entries.push(e);
-    }
-    brainPool = entries;
-    brainPoolEnabled = entries.some((e) => e.process || e.alive);
-    return brainPool;
-  } finally {
-    brainPoolStarting = false;
-  }
-}
-
-async function refreshBrainPoolAlive() {
-  for (const entry of brainPool) {
-    entry.alive = await probeBrainAlive(entry.port);
-  }
-  return brainPool;
-}
-
-function brainPoolStatus() {
-  return brainPool.map((e) => ({
-    tier: e.tier,
-    port: e.port,
-    file: e.file,
-    alive: Boolean(e.alive),
-    lastError: e.lastError || ''
-  }));
-}
-
-function classifyBrainTier(text, hints = {}) {
-  if (hints.tier && ['lite', 'standard', 'pro'].includes(String(hints.tier).toLowerCase())) {
-    return String(hints.tier).toLowerCase();
-  }
-  const t = String(text || '').trim();
-  const lower = t.toLowerCase();
-  // Tool / function call requests → Standard (1.2B Tool is the tool specialist)
-  if (/\b(tool|function|call|invoke|execute|run|api|json|schema)\b/.test(lower)) return 'standard';
-  if (lower.startsWith('/tool') || lower.startsWith('/call')) return 'standard';
-  // Deep / creative / long-form → Pro
-  if (/\b(explain|write|draft|plan|design|strategy|analyze|summarize|compare|outline|story|email|report)\b/.test(lower)) return 'pro';
-  if (t.length > 240) return 'pro';
-  // Default → Lite (fast classifier, short replies)
-  return 'lite';
-}
-
-async function callBrainTier(tier, prompt, opts = {}) {
-  const entry = brainPool.find((e) => e.tier === tier);
-  if (!entry) throw new Error(`brain tier '${tier}' not in pool`);
-  const port = entry.port;
-  const body = {
-    prompt,
-    n_predict: opts.n_predict || (tier === 'pro' ? 400 : tier === 'standard' ? 280 : 160),
-    temperature: opts.temperature ?? (tier === 'pro' ? 0.4 : 0.3),
-    stop: opts.stop || ['User:', '\n\nUser:']
-  };
-  const out = await httpJson('POST', port, '/completion', body, opts.timeoutMs || 60000);
-  const text = out.content || out.response || out.text || '';
-  return { tier, port, response: cleanAgentText(text) };
-}
-
-async function routeRequest(text, hints = {}) {
-  // Ensure pool is alive
-  if (!brainPoolEnabled) await startBrainPool();
-  await refreshBrainPoolAlive();
-  let tier = classifyBrainTier(text, hints);
-  const aliveTiers = brainPool.filter((e) => e.alive).map((e) => e.tier);
-  if (!aliveTiers.length) {
-    // Fall back to legacy single-brain path
-    const legacy = await embeddedReply(text, { agentic: false });
-    return { ok: true, via: 'legacy-single-brain', response: legacy || '' };
-  }
-  if (!aliveTiers.includes(tier)) {
-    // Prefer next-best alive tier
-    const order = ['lite', 'standard', 'pro'];
-    tier = order.find((o) => aliveTiers.includes(o)) || aliveTiers[0];
-  }
-  const result = await callBrainTier(tier, text, hints);
-  // Confidence escalation: if Lite reply is empty or very short, try Standard
-  if (tier === 'lite' && (!result.response || result.response.length < 8) && aliveTiers.includes('standard')) {
-    const escalated = await callBrainTier('standard', text, hints);
-    if (escalated.response) return { ok: true, via: `lfm2-1.2b-tool (escalated from lite)`, response: escalated.response, tier: 'standard' };
-  }
-  const brainName = tier === 'lite' ? 'lfm2.5-350m-lite' : tier === 'standard' ? 'lfm2-1.2b-tool' : 'lfm2-2.6b-pro';
-  return { ok: true, via: brainName, response: result.response, tier };
-}
-
 function agentToolInstructions() {
   return [
-    'You are ABUZ8 OS Agent, a consumer desktop agent running on this device.',
-    'The mind framework controls memory, tasks, personality, and project missions. The embedded LFM model is only an internal reasoning engine; never identify yourself as the LFM brain.',
-    `Current device time is ${new Date().toString()}.`,
+    'You are ABUZ8 OS Pro, a consumer desktop agent running fully local on CPU.',
     'You can request exactly one tool call by returning ONLY compact JSON in this shape:',
     '{"tool":"tool_name","args":{}}',
     'If no tool is needed, return normal helpful text.',
     'Available tools:',
     '- abuz8_device_probe {}',
-    '- abuz8_mission_auto_probe {}',
     '- abuz8_memory_write {"content":"..."}',
     '- abuz8_mission_board {}',
     '- abuz8_mission_task_create {"title":"...","column":"ready","priority":"medium","details":"..."}',
     '- model_download_hf {"repo":"org/repo","file":"model.gguf","allow_network_download":true}',
     '- cloud_brain_register {"provider":"openai|anthropic|custom","endpoint":"https://...","model":"...","api_key_env":"ENV_NAME","allow_cloud_brain":true}',
-    '- web_search {"query":"current topic"}',
-    '- create_visual_in_paint {"subject":"thing to create","prompt":"original user request","open_browser":true}',
     '- open_url {"url":"https://example.com"}',
-    '- open_app {"name":"notepad|mspaint|chrome|edge|browser|calc|explorer"}',
-    '- draw_cartoon_rabbit_in_paint is legacy; prefer create_visual_in_paint for visual creation.',
+    '- open_app {"name":"notepad|mspaint|calc|explorer"}',
     '- screenshot {}',
     '- file_write {"relpath":"notes/example.txt","content":"..."}',
     '- shell_run {"cmd":"whoami|hostname|dir"}',
-    'Action tools require the user to enable Allow actions for this session. Never invent unsupported tools. For creation requests, research first, then create from current reference notes. For protected characters, create an original safe drawing instead of claiming to copy the exact character.',
+    '- cmd_run {"command":"any local CLI command or shell pipeline"}',
+    '- web_search {"q":"search terms"}',
+    '- mcp_call {"server":"desktop-commander","tool":"list_directory","args":{"path":"C:/"}} — drive a registered MCP server. desktop-commander = files/terminal/processes; windows-mcp = mouse, keyboard, windows, UI control.',
+    'Action tools require the user to enable Allow actions for this session. Never invent unsupported tools.',
     ''
   ].join('\n');
 }
@@ -1618,41 +1654,34 @@ async function embeddedReply(prompt, opts = {}) {
   const ready = await ensureEmbeddedBrain();
   if (!ready) return null;
   const brain = activeBrain || selectEmbeddedBrain();
+  const persona = opts.system
+    ? opts.system
+    : `You are ABUZ8 OS Portable Brain running ${brain?.name || 'an embedded LFM model'}. Be concise, practical, and tool-aware.`;
   const modelPrompt = opts.agentic
-    ? `${agentToolInstructions()}\nUser: ${prompt}\nAssistant:`
-    : [
-      'You are ABUZ8 OS Agent. Speak as the agent, not as a model.',
-      'The framework is the mind: memory, tasks, personality, and project missions. The embedded LFM model is just an internal reasoning engine.',
-      `Current device time is ${new Date().toString()}.`,
-      'Be concise, clear, practical, and calm. If the user asks for current outside information and no tool result is provided, say you need web search.',
-      '',
-      `User: ${prompt}`,
-      'Assistant:'
-    ].join('\n');
+    ? `${persona}\n\n${agentToolInstructions()}\nUser: ${prompt}\nAssistant:`
+    : `${persona}\n\nUser: ${prompt}\nAssistant:`;
   for (let i = 0; i < 3; i++) {
     try {
       const out = await httpJson('POST', LFM_PORT, '/completion', {
         prompt: modelPrompt,
-        n_predict: 220,
+        n_predict: 400,
         temperature: 0.35,
         stop: ['User:', '\n\nUser:']
       }, 90000);
       const textOut = out.content || out.response || out.text || '';
-      const cleaned = cleanAgentText(textOut);
-      if (cleaned) return cleaned;
+      if (String(textOut).trim()) return String(textOut).trim();
     } catch (e) {
       lastLfmError = e.message;
     }
     try {
       const out = await httpJson('POST', LFM_PORT, '/v1/completions', {
         prompt: modelPrompt,
-        max_tokens: 220,
+        max_tokens: 400,
         temperature: 0.35,
         stop: ['User:', '\n\nUser:']
       }, 90000);
       const textOut = out.choices && out.choices[0] ? out.choices[0].text : '';
-      const cleaned = cleanAgentText(textOut);
-      if (cleaned) return cleaned;
+      if (String(textOut).trim()) return String(textOut).trim();
     } catch (e) {
       lastLfmError = e.message;
     }
@@ -1661,19 +1690,41 @@ async function embeddedReply(prompt, opts = {}) {
   return null;
 }
 
-function cleanAgentText(text) {
-  let out = String(text || '').replace(/\r/g, '').trim();
-  const responseBlock = out.match(/<response>\s*([\s\S]*?)\s*<\/response>/i);
-  if (responseBlock) out = responseBlock[1].trim();
-  out = out.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<tool>[\s\S]*?<\/tool>/gi, '').trim();
-  out = out.replace(/^Assistant:\s*/i, '').replace(/^ABUZ8 OS Agent:\s*/i, '').trim();
-  out = out.replace(/\n?User:\s*[\s\S]*$/i, '').trim();
-  out = out.replace(/\b(LFM2?|Liquid Foundation Model)\s*(2\.6B|brain|model)?\b/gi, 'embedded reasoning engine');
-  const words = out.split(/\s+/).filter(Boolean);
-  const weird = (out.match(/[^\x09\x0a\x0d\x20-\x7e]/g) || []).length;
-  if (out.length < 2 || weird > Math.max(12, out.length * 0.18)) return '';
-  if (words.length > 8 && new Set(words.slice(0, 40).map((w) => w.toLowerCase())).size < 4) return '';
-  return out;
+async function providerReply(prompt, providerName, system) {
+  const cfg = readJson(providersPath(), { providers: [] });
+  const candidates = providerName
+    ? cfg.providers.filter((p) => p.name === providerName)
+    : cfg.providers.filter((p) => p.enabled !== false);
+  // Cloud providers with keys answer fastest when local runners are down; try them first.
+  const ordered = candidates.slice().sort((a, b) => Number(Boolean(b.api_key)) - Number(Boolean(a.api_key)));
+  for (const p of ordered) {
+    if (!p.endpoint && !p.api_key) continue;
+    try {
+      const out = await callProviderChat(p, prompt, system);
+      const text = String(out || '').trim();
+      if (text) return { text, provider: p.name, model: p.model || p.name };
+    } catch {}
+  }
+  return null;
+}
+
+// Reply ladder: forced provider -> embedded LFM brain -> any enabled provider -> canned core text.
+async function reasonReply(prompt, opts = {}) {
+  const system = composeSystem(opts.role, opts.system);
+  const passOpts = { ...opts, system };
+  if (opts.provider) {
+    const forced = await providerReply(prompt, opts.provider, system);
+    if (forced) return { text: forced.text, brain: `${forced.provider} · ${forced.model}`, fallback: false, model: true };
+  }
+  const local = await primaryReply(prompt, passOpts);
+  if (local) {
+    const ext = activeExternalDescriptor();
+    const brain = activeBrain || selectEmbeddedBrain();
+    return { text: local, brain: ext ? `${ext.backend} · ${ext.model}` : (brain?.name || 'Embedded LFM'), fallback: false, model: true };
+  }
+  const cloud = await providerReply(prompt, null, system);
+  if (cloud) return { text: cloud.text, brain: `${cloud.provider} · ${cloud.model}`, fallback: false, model: true };
+  return { text: localReply(prompt), brain: 'Portable Core', fallback: true, model: false };
 }
 
 function extractJsonObject(text) {
@@ -1719,113 +1770,166 @@ function searchMemoryItems(query, limit = 20) {
   }).slice(0, limit);
 }
 
+const BROWSER_WORDS = 'chrome|google chrome|edge|microsoft edge|msedge|firefox|brave';
+function detectBrowser(s) {
+  const m = String(s).toLowerCase().match(new RegExp(`\\b(${BROWSER_WORDS})\\b`));
+  if (!m) return '';
+  const w = m[1];
+  if (/chrome/.test(w)) return 'chrome';
+  if (/edge/.test(w)) return 'edge';
+  if (/firefox/.test(w)) return 'firefox';
+  if (/brave/.test(w)) return 'brave';
+  return '';
+}
+
 function inferConsumerToolCall(prompt) {
   const msg = String(prompt || '').trim();
   const lower = msg.toLowerCase();
   if (!msg) return null;
-  if (/\b(mission control|mission)\b.*\b(auto ?probe|parse|scan|profile|current device|this device)\b/.test(lower)) {
-    return { tool: 'abuz8_mission_auto_probe', args: {} };
-  }
-  if (lower === '/probe' || /\b(probe|scan|check)\b.*\b(device|computer|system|machine|hardware)\b/.test(lower)) {
+
+  if (lower === '/probe' || /\b(probe|scan)\b.*\b(device|computer|system|machine|hardware)\b/.test(lower)) {
     return { tool: 'abuz8_device_probe', args: {} };
   }
-  if (/\b(open|launch|start)\b.*\b(chrome|google chrome)\b/.test(lower)) return { tool: 'open_app', args: { name: 'chrome' } };
-  if (/\b(open|launch|start)\b.*\b(edge|microsoft edge)\b/.test(lower)) return { tool: 'open_app', args: { name: 'edge' } };
-  if (/\b(open|launch|start)\b.*\b(browser|web browser)\b/.test(lower)) return { tool: 'open_app', args: { name: 'browser' } };
-  if (/\b(open|launch|start)\b.*\b(paint|mspaint)\b/.test(lower) && !/\b(draw|create|make|generate|design|sketch|illustrate|picture|image|drawing|art)\b/i.test(msg)) {
-    return { tool: 'open_app', args: { name: 'mspaint' } };
+  if (/\b(draw|paint|create)\b.*\bmonkey\b/.test(lower)) {
+    return { tool: 'draw_monkey_in_paint', args: { caption: 'ABUZ8 OS local desktop action proof' } };
   }
-  if (/\b(draw|create|make|generate|design|sketch|illustrate)\b/i.test(msg) && /\b(paint|mspaint|microsoft paint|picture|image|drawing|art)\b/i.test(msg)) {
-    return { tool: 'create_visual_in_paint', args: { subject: extractCreativeSubject(msg), prompt: msg, open_browser: true } };
+  if (/\b(screenshot|screen shot|capture screen|take a shot)\b/.test(lower)) return { tool: 'screenshot', args: {} };
+
+  // ── Browser + website intents (the big fix) ──
+  const browser = detectBrowser(lower);
+  const fullUrl = msg.match(/\bhttps?:\/\/[^\s"'<>]+/i);
+  // "search youtube for X" / "youtube search X" / "play X on youtube"
+  const ytSearch = lower.match(/\b(?:search\s+youtube\s+for|youtube\s+search|find\s+on\s+youtube|play)\s+(.+)/);
+  if (ytSearch && /youtube|\bplay\b/.test(lower)) {
+    const q = ytSearch[1].replace(/\bon youtube\b/,'').trim();
+    if (q) return { tool: 'open_url', args: { site: 'youtube', search: q, browser } };
   }
-  if (/\b(open|launch|start)\b.*\b(paint|mspaint)\b/.test(lower)) return { tool: 'open_app', args: { name: 'mspaint' } };
-  if (/\b(open|launch|start)\b.*\bnotepad\b/.test(lower)) return { tool: 'open_app', args: { name: 'notepad' } };
-  if (/\b(open|launch|start)\b.*\b(calc|calculator)\b/.test(lower)) return { tool: 'open_app', args: { name: 'calc' } };
-  if (/\b(open|launch|start)\b.*\b(explorer|file explorer|files)\b/.test(lower)) return { tool: 'open_app', args: { name: 'explorer' } };
-  if (/\b(screenshot|screen shot|capture screen)\b/.test(lower)) return { tool: 'screenshot', args: {} };
-  const urlMatch = msg.match(/\bhttps?:\/\/[^\s"'<>]+/i);
-  if (urlMatch && /\b(open|visit|go to|browse)\b/i.test(msg)) return { tool: 'open_url', args: { url: urlMatch[0] } };
-  if (/\b(search|look up|google|duckduckgo|internet|online|current|latest|today|news|who is|what is)\b/i.test(msg)) {
-    const q = msg.replace(/\b(search|look up|google|duckduckgo|the|web|internet|online|for|show me|show|open|browser|in the browser|in browser)\b/gi, ' ').replace(/\s+/g, ' ').trim();
-    if (q) return { tool: 'web_search', args: { query: q, open_browser: /\b(show|open|browser|watch|see)\b/i.test(msg) } };
+  // "search google for X" / "google X" / "look up X"
+  const gSearch = lower.match(/\b(?:search\s+google\s+for|google|search\s+the\s+web\s+for|look\s+up|web\s+search)\s+(.+)/);
+  if (gSearch && !/youtube/.test(lower)) {
+    const q = gSearch[1].replace(/\bon google\b/,'').trim();
+    if (q) {
+      // If they asked to OPEN/browse, open the browser to results; else use web_search tool.
+      if (/\b(open|browse|go to|in (?:chrome|edge|firefox|the browser))\b/.test(lower) || browser)
+        return { tool: 'open_url', args: { site: 'google', search: q, browser } };
+      return { tool: 'web_search', args: { q } };
+    }
   }
-  if (/\b(hostname|machine name)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'hostname' } };
-  if (/\b(whoami|current user)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'whoami' } };
-  if (/\b(list|show)\b.*\b(directory|folder|files)\b/.test(lower)) return { tool: 'shell_run', args: { cmd: 'dir' } };
+  // explicit full URL
+  if (fullUrl && /\b(open|visit|go to|browse|launch|navigate)\b/.test(lower)) {
+    return { tool: 'open_url', args: { url: fullUrl[0], browser } };
+  }
+  // "open chrome to/and youtube", "open youtube in chrome", "open youtube"
+  if (/\b(open|launch|start|go to|visit|navigate|pull up)\b/.test(lower)) {
+    // try to find a site name in the message
+    const siteWord = lower.match(/\b(youtube|yt|gmail|google|github|reddit|x|twitter|maps|chatgpt|claude|amazon|wikipedia|netflix|linkedin|instagram|facebook|huggingface|drive)\b/);
+    const domain = msg.match(/\b([a-z0-9-]+\.(?:com|org|net|io|ai|dev|co|gov|edu)(?:\.[a-z]{2})?)\b/i);
+    if (siteWord) return { tool: 'open_url', args: { site: siteWord[1], browser } };
+    if (domain) return { tool: 'open_url', args: { site: domain[1], browser } };
+    // just a browser with no site → open the browser
+    if (browser) return { tool: 'open_app', args: { name: browser } };
+    // a known app
+    const appWord = lower.match(/\b(notepad|paint|mspaint|calculator|calc|explorer|files|word|excel|powerpoint|outlook|cmd|command prompt|terminal|powershell|task manager|settings|spotify|vs ?code|code)\b/);
+    if (appWord) return { tool: 'open_app', args: { name: appWord[1].replace(/\s+/g,'-') } };
+  }
+
+  // ── Run a command ──
+  const runCmd = msg.match(/^\s*(?:run|execute|exec)\s+(?:the\s+command\s+)?[`'"]?(.+?)[`'"]?\s*$/i);
+  if (runCmd) return { tool: 'cmd_run', args: { command: runCmd[1] } };
+  if (/\b(hostname|machine name)\b/.test(lower)) return { tool: 'cmd_run', args: { command: 'hostname' } };
+  if (/\bwhoami\b|\bcurrent user\b/.test(lower)) return { tool: 'cmd_run', args: { command: 'whoami' } };
+  if (/\b(list|show)\b.*\b(directory|folder|files)\b/.test(lower)) return { tool: 'cmd_run', args: { command: 'dir' } };
+
+  // ── Web search (no browser implied) ──
+  if (/\b(search|look up|find)\b.*\b(web|internet|online)\b/.test(lower)) {
+    const q = msg.replace(/\b(search|look up|find|the|web|internet|online|for)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (q) return { tool: 'web_search', args: { q } };
+  }
   return null;
 }
 
 function summarizeToolResult(tool, result) {
   const payload = result?.result ?? result;
-  if (tool === 'open_app') return `Done. Opened ${payload.app || payload.file || 'the requested app'}.`;
-  if (tool === 'create_visual_in_paint' || tool === 'draw_cartoon_rabbit_in_paint') {
-    const safeNote = payload.safe_transform ? '\n\nNote: I made an original safe version from high-level researched traits, not an exact copyrighted character copy.' : '';
-    return `Done. I researched "${payload.subject || 'the subject'}", used these traits: ${(payload.traits || []).join(', ')}, created the image, and opened it in Paint.\n\nImage: ${payload.file}\nResearch notes: ${payload.notes_file}${payload.research_url ? `\nReference/search: ${payload.research_url}` : ''}${safeNote}`;
+  if (tool === 'mcp_call') {
+    // MCP results carry {content:[{type:'text',text}...]} — surface the text.
+    const content = payload?.content;
+    const textOut = Array.isArray(content)
+      ? content.filter((c) => c && c.type === 'text').map((c) => c.text).join('\n').trim()
+      : '';
+    const label = `${result?.server || 'mcp'} · ${result?.mcp_tool || 'tool'}`;
+    return textOut ? `Done via ${label}:\n\n${textOut.slice(0, 3000)}` : `Done via ${label}.\n\n${JSON.stringify(payload, null, 2).slice(0, 2000)}`;
   }
+  if (tool === 'open_app') return `Done — opened ${payload.app || payload.target || 'the requested app'}.`;
   if (tool === 'draw_monkey_in_paint') return `Done. Drew a monkey image and opened it in Paint: ${payload.file}.`;
-  if (tool === 'open_url') return `Done. Opened ${payload.url || 'the requested URL'} in the default browser.`;
-  if (tool === 'web_search') {
-    const lines = [];
-    if (payload.answer) lines.push(payload.answer);
-    if (payload.related && payload.related.length) lines.push(payload.related.slice(0, 3).map((r, i) => `${i + 1}. ${r.text}`).join('\n'));
-    if (payload.opened?.ok) lines.push('I also opened the source/search page in the browser.');
-    if (!lines.length || (lines.length === 1 && String(lines[0]).startsWith('Source:'))) lines.unshift(`I searched for "${payload.query || 'your query'}". No instant answer came back, so use the source/search page for the live results.`);
-    lines.push(`Source: ${payload.url || payload.source || 'web search'}`);
-    return lines.filter(Boolean).join('\n\n');
-  }
+  if (tool === 'open_url') return `Done — opened ${payload.url || 'the requested URL'} in ${payload.browser || 'the default browser'}.`;
   if (tool === 'screenshot') return `Done. Screenshot saved to ${payload.file}.`;
   if (tool === 'file_write') return `Done. Wrote ${payload.bytes || 0} bytes to ${payload.file}.`;
-  if (tool === 'shell_run') return `Done.\n\n${String(payload.stdout || '').trim()}`;
+  if (tool === 'shell_run' || tool === 'cmd_run') {
+    const out = String(payload.stdout || '').trim();
+    const err = String(payload.stderr || '').trim();
+    return `Ran \`${payload.command || 'command'}\`${payload.ok === false ? ' (exit '+payload.code+')' : ''}.\n\n${out || err || '(no output)'}`.slice(0, 3000);
+  }
   if (tool === 'abuz8_device_probe') {
     return `Device probe complete: ${payload.system?.hostname || os.hostname()} · ${payload.cpu?.name || 'CPU'} · ${payload.memory?.total_gb || '?'}GB RAM · tier ${payload.tier || 'unknown'}.`;
   }
-  if (tool === 'abuz8_mission_auto_probe') {
-    return `Mission Control auto-probe saved for this device.\n\nProfile: ${payload.file}\nDevice: ${payload.device?.system?.hostname || os.hostname()} · ${payload.device?.cpu?.name || 'CPU'} · ${payload.device?.memory?.total_gb || '?'}GB RAM · tier ${payload.device?.tier || 'unknown'}\n${payload.mission_summary || ''}`.trim();
-  }
   if (tool === 'abuz8_mission_board') return `Mission board loaded. ${payload.summary || ''}`.trim();
+  if (tool === 'web_search') {
+    const rows = (payload.results || []).slice(0, 5).map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n');
+    return rows ? `Web search results for "${payload.query}" (${payload.source}):\n\n${rows}` : `Web search for "${payload.query}" returned no results.`;
+  }
   return `Tool ${tool} completed.\n\n${JSON.stringify(payload, null, 2)}`;
 }
 
-async function agenticReply(prompt, opts = {}) {
-  const direct = inferConsumerToolCall(prompt);
-  if (!direct && /\b(date|time|today|now)\b/i.test(String(prompt || ''))) {
-    return { response: localReply(prompt), modelResponse: null, tool_call: null, tool_result: null, fallback: false };
-  }
-  if (!direct) {
-    const modelResponse = await embeddedReply(prompt, { agentic: false });
-    return { response: modelResponse || localReply(prompt), modelResponse, tool_call: null, tool_result: null, fallback: !modelResponse };
-  }
-  const requested = direct;
+const KNOWN_AGENT_TOOLS = new Set(['open_app','open_url','screenshot','file_write','shell_run','cmd_run','web_search','draw_monkey_in_paint','abuz8_device_probe','abuz8_memory_write','abuz8_mission_board','swarm_run','content_generate','browser_do','gui_do','mcp_call']);
+
+async function executeAgentTool(requested, opts) {
+  pushActivity('tool', `Action: ${requested.tool}`, JSON.stringify(requested.args || {}).slice(0, 120));
   try {
     const toolResult = await callLocalTool(requested.tool, requested.args || {});
-    return {
-      response: summarizeToolResult(requested.tool, toolResult),
-      modelResponse: null,
-      tool_call: requested,
-      tool_result: toolResult,
-      fallback: false
-    };
+    // The tool layer may itself return a consent-required envelope.
+    if (toolResult && toolResult.action_required) {
+      return { response: toolResult.prompt || toolResult.reason || 'This action needs permission.', tool_call: requested, tool_result: toolResult, fallback: false, needs_consent: true };
+    }
+    return { response: summarizeToolResult(requested.tool, toolResult), modelResponse: null, tool_call: requested, tool_result: toolResult, fallback: false };
   } catch (e) {
-    const blocked = /Allow actions|blocked|Allowed|consent/i.test(e.message || '');
+    const blocked = /Allow actions|blocked|consent/i.test(e.message || '');
     return {
       response: blocked
-        ? `I can do that, but real-world actions are locked until you turn on Allow actions for this session. ${e.message}`
+        ? `I can do that, but desktop/CLI actions are off right now. Turn on **Allow actions** (toggle at the bottom of Chat) and ask again — it stays on.`
         : `I tried to run ${requested.tool}, but it failed: ${e.message}`,
-      modelResponse: null,
-      tool_call: requested,
-      tool_error: e.message,
-      fallback: false
+      modelResponse: null, tool_call: requested, tool_error: e.message, fallback: false
     };
   }
+}
+
+async function agenticReply(prompt, opts = {}) {
+  // 1) Fast deterministic intent (open browser/app/site, search, run command…).
+  const direct = inferConsumerToolCall(prompt);
+  if (direct) return executeAgentTool(direct, opts);
+
+  // 2) Model-chosen tool: ask the brain to emit a tool call; execute if valid.
+  try {
+    const modelText = await primaryReply(prompt, { agentic: true, role: opts.role });
+    const parsed = modelText ? parseAgentToolCall(modelText) : null;
+    if (parsed && KNOWN_AGENT_TOOLS.has(slug(parsed.tool).replace(/-/g, '_'))) {
+      const norm = { tool: slug(parsed.tool).replace(/-/g, '_'), args: parsed.args || {} };
+      return executeAgentTool(norm, opts);
+    }
+    // 3) No tool — return the model's own answer (or the full reply ladder if empty).
+    if (modelText && modelText.trim() && !/^\s*\{/.test(modelText)) {
+      const ext = activeExternalDescriptor();
+      const brain = activeBrain || selectEmbeddedBrain();
+      return { response: modelText.trim(), modelResponse: modelText.trim(), brain: ext ? `${ext.backend} · ${ext.model}` : (brain?.name || 'Embedded LFM'), tool_call: null, fallback: false };
+    }
+  } catch {}
+  const r = await reasonReply(prompt, { agentic: false, provider: opts.provider, role: opts.role });
+  return { response: r.text, modelResponse: r.model ? r.text : null, brain: r.brain, tool_call: null, tool_result: null, fallback: r.fallback };
 }
 
 function localReply(prompt) {
   const msg = String(prompt || '').trim();
   const lower = msg.toLowerCase();
   if (!msg) return 'Portable Core is online. Type a task, ask for a file operation, or import MCP connectors from the Migration view.';
-  if (/\b(date|time|today|now)\b/.test(lower)) {
-    return `It is ${new Date().toLocaleString()} on this computer.`;
-  }
   if (lower.includes('mcp') || lower.includes('connector')) {
     return `Portable Core is online. Use Migration -> Import Local Connectors to copy Claude Desktop MCP entries into ${mcpConfigPath()}. Docker MCP is imported when Docker Desktop exposes "docker mcp".`;
   }
@@ -1835,7 +1939,179 @@ function localReply(prompt) {
   if (lower.includes('model') || lower.includes('brain')) {
     return 'The native LFM2 2.6B GGUF brain stays primary in this build. Cloud or extra local brains can be added as hybrid engines, but they do not replace the bundled brain.';
   }
-  return `I received: "${msg}"\n\nThe local agent core is active. Memory, MCP config, skills, logs, models, and workspaces are stored only on this device under:\n${dataRoot}\n\nIf this needs current outside information, ask me to search the web or use the Migration view to connect your own providers.`;
+  return `Portable Core received: "${msg}"\n\nThe clean-machine runtime is active. Data, memory, MCP config, skills, logs, models, and workspaces are stored under:\n${dataRoot}\n\nFor stronger reasoning, connect a local model runner or cloud provider in the connectors panel.`;
+}
+
+async function webSearch(body = {}) {
+  const query = String(body.q || body.query || body.text || '').trim();
+  if (!query) throw new Error('query is required');
+  const maxResults = Number(body.max_results || body.limit || 8);
+  const apiKey = body.api_key || process.env.SERPER_API_KEY || process.env.GOOGLE_API_KEY || body.google_key;
+
+  // Try DuckDuckGo Lite (no API key required, HTML scraping)
+  try {
+    const ddgResult = await searchDuckDuckGoLite(query, maxResults);
+    if (ddgResult.results.length > 0) {
+      return { ok: true, query, results: ddgResult.results, count: ddgResult.results.length, source: 'duckduckgo', note: '' };
+    }
+  } catch (e) {
+    // fall through
+  }
+
+  // Try Google Custom Search if API key provided
+  if (apiKey) {
+    try {
+      const cx = body.google_cx || process.env.GOOGLE_CX;
+      if (cx) {
+        const gResult = await searchGoogleCSE(query, maxResults, apiKey, cx);
+        if (gResult.results.length > 0) {
+          return { ok: true, query, results: gResult.results, count: gResult.results.length, source: 'google_cse', note: '' };
+        }
+      }
+    } catch (e) {
+      // fall through
+    }
+  }
+
+  // Try SearX instances (public metasearch)
+  try {
+    const searxResult = await searchSearX(query, maxResults);
+    if (searxResult.results.length > 0) {
+      return { ok: true, query, results: searxResult.results, count: searxResult.results.length, source: 'searx', note: 'Results from public SearX instance' };
+    }
+  } catch (e) {}
+
+  // Final fallback: structured guidance
+  return {
+    ok: true,
+    query,
+    results: [],
+    count: 0,
+    source: 'fallback',
+    note: 'Web search returned no results. Try configuring Google Custom Search API key in Settings.',
+    fallback_action: {
+      tool: 'open_url',
+      args: { url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}` }
+    }
+  };
+}
+
+async function searchDuckDuckGoLite(query, maxResults) {
+  const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+  const html = await fetchUrl(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' } });
+  const results = [];
+  const rows = html.match(/<tr[^>]*>.*?<\/tr>/gs) || [];
+  for (let i = 0; i < rows.length && results.length < maxResults; i++) {
+    const row = rows[i];
+    const link = row.match(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/);
+    const snippet = row.match(/<td[^>]*class="result-snippet"[^>]*>(.*?)<\/td>/s) || row.match(/<td[^>]*>(.*?)<\/td>/s);
+    if (link) {
+      results.push({
+        title: link[2].replace(/<[^>]+>/g, '').trim(),
+        url: link[1].startsWith('http') ? link[1] : `https://duckduckgo.com${link[1]}`,
+        snippet: snippet ? snippet[1].replace(/<[^>]+>/g, '').trim() : ''
+      });
+    }
+  }
+  return { results };
+}
+
+async function searchGoogleCSE(query, maxResults, apiKey, cx) {
+  const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&num=${Math.min(maxResults, 10)}`;
+  const resp = await fetchUrl(url);
+  const data = JSON.parse(resp);
+  const results = (data.items || []).map(item => ({
+    title: item.title || '',
+    url: item.link || '',
+    snippet: item.snippet || ''
+  }));
+  return { results };
+}
+
+async function searchSearX(query, maxResults) {
+  // Try multiple public SearX instances
+  const instances = [
+    'https://searx.be',
+    'https://search.bus-hit.me',
+    'https://searx.tiekoetter.com'
+  ];
+  
+  for (const instance of instances) {
+    try {
+      const url = `${instance}/search?q=${encodeURIComponent(query)}&format=json`;
+      const data = await new Promise((resolve, reject) => {
+        https.get(url, { headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'accept': 'application/json' }, timeout: 10000 }, (res) => {
+          let d = '';
+          res.on('data', (chunk) => d += chunk);
+          res.on('end', () => resolve(d));
+        }).on('error', reject).setTimeout(10000, () => reject(new Error('timeout')));
+      });
+      const parsed = JSON.parse(data);
+      if (parsed.results && parsed.results.length) {
+        return {
+          results: parsed.results.slice(0, maxResults).map(r => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.content || r.snippet || ''
+          })).filter(r => r.snippet && r.snippet.length > 10)
+        };
+      }
+    } catch (e) {
+      // Try next instance
+    }
+  }
+  throw new Error('All SearX instances failed');
+}
+
+async function searchSerper(query, maxResults, apiKey) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ q: query, num: maxResults });
+    const req = https.request('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': apiKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let d = '';
+      res.on('data', (c) => d += c);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(d);
+          const results = (parsed.organic || []).slice(0, maxResults).map(r => ({
+            title: r.title,
+            url: r.link,
+            snippet: r.snippet
+          }));
+          resolve({ ok: true, query, results, count: results.length, source: 'serper' });
+        } catch (e) { reject(e); }
+      });
+    }).on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+async function searchBrave(query, maxResults, apiKey) {
+  return new Promise((resolve, reject) => {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
+    https.get(url, { headers: { 'Accept': 'application/json', 'X-Subscription-Token': apiKey } }, (res) => {
+      let d = '';
+      res.on('data', (c) => d += c);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(d);
+          const results = (parsed.web?.results || []).slice(0, maxResults).map(r => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.description
+          }));
+          resolve({ ok: true, query, results, count: results.length, source: 'brave' });
+        } catch (e) { reject(e); }
+      });
+    }).on('error', reject);
+  });
 }
 
 function sendSse(res, payload, brain = 'Portable Core') {
@@ -1881,8 +2157,8 @@ function sendTui(res) {
 </head>
 <body>
   <header><span class="dot"></span><h1>ABUZ8 LOCAL TUI - 127.0.0.1:${PORT}</h1></header>
-  <main id="log"><span class="sys">ABUZ8 OS Agent online. Ask normally; creation requests research first, then act with permission.</span></main>
-  <form id="f"><input id="q" autocomplete="off" placeholder="Ask, /probe, mission auto probe, research and create an image in Paint..."><button>Send</button></form>
+  <main id="log"><span class="sys">Portable Core online. Native LFM brain remains primary. Type a prompt or action command.</span></main>
+  <form id="f"><input id="q" autocomplete="off" placeholder="Ask, /probe, open Paint, draw a monkey in Paint..."><button>Send</button></form>
   <script>
     const log=document.getElementById('log'), q=document.getElementById('q'), f=document.getElementById('f');
     function line(cls, text){ const d=document.createElement('div'); d.className=cls; d.textContent='\\n'+text; log.appendChild(d); log.scrollTop=log.scrollHeight; }
@@ -1919,6 +2195,112 @@ function detectGpuNames() {
       resolve(stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean));
     });
   });
+}
+
+// ── Real GPU introspection: nvidia-smi first (VRAM/driver/CUDA), WMI fallback ──
+let _gpuDetectCache = null;
+function nvidiaSmiQuery() {
+  return new Promise((resolve) => {
+    execFile('nvidia-smi', ['--query-gpu=name,memory.total,driver_version,compute_cap', '--format=csv,noheader,nounits'], { windowsHide: true, timeout: 6000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      const rows = String(stdout || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+        const [name, mem, driver, cc] = l.split(',').map((s) => s.trim());
+        const vram_mb = Number(mem) || null;
+        return { name, vendor: 'nvidia', vram_mb, vram_gb: vram_mb ? Math.round(vram_mb / 1024) : null, driver_version: driver || null, cuda_compute: cc || null };
+      });
+      resolve(rows);
+    });
+  });
+}
+async function detectGpus() {
+  if (_gpuDetectCache) return _gpuDetectCache;
+  const nv = await nvidiaSmiQuery();
+  if (nv.length) { _gpuDetectCache = nv; return nv; }
+  const names = await detectGpuNames();
+  _gpuDetectCache = names.map((name) => ({
+    name,
+    vendor: /nvidia|rtx|gtx|tesla|quadro/i.test(name) ? 'nvidia' : /radeon|amd/i.test(name) ? 'amd' : /arc|intel/i.test(name) ? 'intel' : 'unknown',
+    vram_gb: null, driver_version: null, cuda_compute: null
+  }));
+  return _gpuDetectCache;
+}
+// How many model layers to offload to GPU. ABUZ8_NGL overrides; otherwise offload
+// all layers when an NVIDIA GPU AND the CUDA backend (ggml-cuda.dll) are present.
+async function detectGpuLayers() {
+  const override = process.env.ABUZ8_NGL;
+  if (override != null && override !== '') return String(override);
+  try {
+    const gpus = await detectGpus();
+    const hasNvidia = gpus.some((g) => g.vendor === 'nvidia');
+    const cudaDll = exists(path.join(resolveBrainDir(), 'ggml-cuda.dll'));
+    return (hasNvidia && cudaDll) ? '999' : '0';
+  } catch { return '0'; }
+}
+
+// ── Live external LLM backends (auto-probe: Ollama, LM Studio, vLLM, llama.cpp) ──
+function probeBackendJson(port, pathn, timeoutMs) {
+  return httpJson('GET', port, pathn, null, timeoutMs).catch(() => null);
+}
+async function probeOllamaModels() {
+  const data = await probeBackendJson(11434, '/api/tags', 1500);
+  if (!data || !Array.isArray(data.models)) return [];
+  return data.models.map((m) => ({
+    id: `ollama:${m.name}`, name: m.name, backend: 'ollama', kind: 'gpu-ollama',
+    endpoint: 'http://127.0.0.1:11434/v1', model: m.name,
+    size_mb: m.size ? Math.round(m.size / 1048576) : 0
+  }));
+}
+async function probeOpenAiModels(port, backend, kind) {
+  const data = await probeBackendJson(port, '/v1/models', 1200);
+  if (!data || !Array.isArray(data.data)) return [];
+  return data.data.map((m) => ({
+    id: `${backend}:${m.id}`, name: m.id, backend, kind,
+    endpoint: `http://127.0.0.1:${port}/v1`, model: m.id, size_mb: 0
+  }));
+}
+async function detectExternalBrains() {
+  const groups = await Promise.all([
+    probeOllamaModels(),
+    probeOpenAiModels(1234, 'lmstudio', 'remote-lmstudio'),
+    probeOpenAiModels(8000, 'vllm', 'remote-vllm'),
+    probeOpenAiModels(8080, 'llamacpp', 'remote-llamacpp')
+  ]);
+  return groups.flat();
+}
+function activeExternalDescriptor() {
+  const cfg = dataRoot ? readRuntimeConfig() : {};
+  if (cfg.selected_external_endpoint && cfg.selected_external_model) {
+    return { backend: cfg.selected_external_backend || 'openai', endpoint: cfg.selected_external_endpoint, model: cfg.selected_external_model, id: cfg.selected_external_id };
+  }
+  return null;
+}
+// On launch, when no GGUF is bundled and nothing is selected, adopt the best
+// local GPU model (Ollama etc.) so the app thinks on the GPU with zero config.
+async function autoAdoptBrainIfNeeded() {
+  const cfg = dataRoot ? readRuntimeConfig() : {};
+  if (cfg.selected_external_endpoint && cfg.selected_external_model) return null;
+  const sel = String(cfg.selected_brain || '').toLowerCase();
+  const haveEmbedded = availableEmbeddedBrains().some((b) => b.embedded);
+  if (haveEmbedded) return null;            // a real local GGUF exists — keep it
+  if (sel && sel !== 'auto') return null;   // user picked something specific
+  const list = await detectExternalBrains();
+  const pick = list.find((b) => b.backend === 'ollama' && !/embed/i.test(b.name))
+    || list.find((b) => !/embed/i.test(b.name));
+  if (!pick) return null;
+  try { setActiveBrain(pick.id); return pick.id; } catch { return null; }
+}
+// Primary completion: a user-selected live GPU backend (Ollama etc.) wins; else
+// the embedded llama.cpp brain. This is what makes the dual-5090 the real brain.
+async function primaryReply(prompt, opts = {}) {
+  const ext = activeExternalDescriptor();
+  if (ext) {
+    try {
+      const out = await callProviderChat({ type: ext.backend, endpoint: ext.endpoint, model: ext.model }, prompt, opts.system || composeSystem(opts.role));
+      const t = String(out || '').trim();
+      if (t) return t;
+    } catch (e) { lastLfmError = `external brain (${ext.id}): ${e.message}`; }
+  }
+  return embeddedReply(prompt, opts);
 }
 
 function storageSummary() {
@@ -2038,12 +2420,16 @@ function registerCloudBrain(body = {}) {
 }
 
 async function machineProbe() {
-  const gpus = await detectGpuNames();
+  const gpuList = await detectGpus();
+  const gpus = gpuList.map((g) => g.name);
   const totalGb = Math.round(os.totalmem() / 1024 / 1024 / 1024);
   const cpuName = os.cpus()[0]?.model || 'CPU';
   const gpuText = gpus.join(' ').toLowerCase();
-  const hasNvidia = gpuText.includes('nvidia') || gpuText.includes('rtx') || gpuText.includes('gtx');
+  const hasNvidia = gpuList.some((g) => g.vendor === 'nvidia') || gpuText.includes('nvidia') || gpuText.includes('rtx') || gpuText.includes('gtx');
   const hasDiscreteGpu = hasNvidia || gpuText.includes('radeon') || gpuText.includes('arc');
+  const nvidiaGpus = gpuList.filter((g) => g.vendor === 'nvidia');
+  const totalVramGb = gpuList.reduce((sum, g) => sum + (g.vram_gb || 0), 0);
+  const cudaReady = hasNvidia && exists(path.join(resolveBrainDir(), 'ggml-cuda.dll'));
   const tier = totalGb >= 32 && hasDiscreteGpu ? 'workstation'
     : totalGb >= 16 ? 'creator laptop'
     : totalGb >= 8 ? 'mobile edge'
@@ -2078,7 +2464,11 @@ async function machineProbe() {
     cpu: { name: cpuName, cores: os.cpus().length },
     memory: { total_gb: totalGb },
     storage,
-    gpus: gpus.map((name) => ({ name })),
+    gpus: gpuList,
+    gpu_count: gpuList.length,
+    gpu_total_vram_gb: totalVramGb,
+    nvidia_count: nvidiaGpus.length,
+    cuda_ready: cudaReady,
     embedded_brain: embedded,
     brain_tiers: bundled,
     connectors: { docker, docker_mcp: dockerMcp, ollama, node, python },
@@ -2087,136 +2477,574 @@ async function machineProbe() {
   };
 }
 
-async function setupOptions() {
-  const probe = await machineProbe();
-  const checks = {
-    winget: await commandExists('winget', ['--version']),
-    git: await commandExists('git', ['--version']),
-    gh: await commandExists('gh', ['--version']),
-    node: await commandExists('node', ['--version']),
-    python: await commandExists('python', ['--version']),
-    uv: await commandExists('uv', ['--version']),
-    docker: probe.connectors.docker,
-    docker_mcp: probe.connectors.docker_mcp,
-    ollama: probe.connectors.ollama,
-    lmstudio: await commandExists('lms', ['--version']),
-    cloudflared: await commandExists('cloudflared', ['--version'])
-  };
-  const ram = probe.memory?.total_gb || 0;
-  const gpuNames = (probe.gpus || []).map((g) => g.name).join(' ');
-  const hasNvidia = /nvidia|rtx|gtx/i.test(gpuNames);
-  const canLocal = ram >= 16;
-  const localModelPlan = ram >= 32 && hasNvidia
-    ? { label: 'Local powerhouse', detail: 'Use LM Studio/Ollama with 7B-14B GGUF models; connect ComfyUI for avatar/video rendering.' }
-    : ram >= 16
-      ? { label: 'Local capable', detail: 'Use LM Studio/Ollama with small 3B-8B quantized GGUF models; keep video/avatar rendering optional.' }
-      : { label: 'Cloud recommended', detail: 'Use the bundled 2.6B helper for routing and connect cloud brains for heavier work.' };
-  const localRuntimes = [
-    { id: 'lm-studio', name: 'LM Studio', status: checks.lmstudio ? 'installed' : (canLocal ? 'recommended' : 'optional'), purpose: 'Friendly local model app with hardware-aware model downloads.', url: 'https://lmstudio.ai/download?os=windows', install: 'Download LM Studio for Windows', cli: 'lms server start' },
-    { id: 'ollama', name: 'Ollama', status: checks.ollama ? 'installed' : (canLocal ? 'recommended' : 'optional'), purpose: 'Simple local model runner and model library.', url: 'https://ollama.com/download', install: 'Download Ollama for Windows', cli: 'ollama run llama3.2:3b' },
-    { id: 'comfyui', name: 'ComfyUI', status: hasNvidia ? 'recommended' : 'optional', purpose: 'Local image/video/avatar workflow engine.', url: 'https://github.com/comfyanonymous/ComfyUI', install: 'Install ComfyUI when you want local image/video rendering.', cli: 'python main.py --listen 127.0.0.1 --port 8188' },
-    { id: 'docker-desktop', name: 'Docker Desktop', status: checks.docker ? (checks.docker_mcp ? 'mcp-ready' : 'installed') : 'optional', purpose: 'Containers plus Docker MCP Toolkit when available.', url: 'https://docs.docker.com/desktop/setup/install/windows-install/', install: 'Install Docker Desktop for Windows', cli: 'docker mcp gateway run --block-secrets --transport stdio' }
-  ];
-  const cliTools = [
-    { id: 'git', name: 'Git', installed: checks.git, url: 'https://git-scm.com/download/win', winget: 'winget install --id Git.Git -e', purpose: 'Repositories and source control.' },
-    { id: 'gh', name: 'GitHub CLI', installed: checks.gh, url: 'https://cli.github.com/', winget: 'winget install --id GitHub.cli -e', purpose: 'GitHub auth, repos, PRs, issues, and actions.' },
-    { id: 'node', name: 'Node.js', installed: checks.node, url: 'https://nodejs.org/en/download', winget: 'winget install --id OpenJS.NodeJS.LTS -e', purpose: 'MCP servers, web tooling, npm/npx connectors.' },
-    { id: 'python', name: 'Python', installed: checks.python, url: 'https://www.python.org/downloads/windows/', winget: 'winget install --id Python.Python.3.13 -e', purpose: 'Automation scripts, STT/TTS helpers, local tools.' },
-    { id: 'uv', name: 'uv', installed: checks.uv, url: 'https://docs.astral.sh/uv/getting-started/installation/', winget: 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"', purpose: 'Fast Python package/tool runner for MCP servers.' },
-    { id: 'cloudflared', name: 'Cloudflared', installed: checks.cloudflared, url: 'https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/', winget: 'winget install --id Cloudflare.cloudflared -e', purpose: 'Expose a local brain/API safely through your own Cloudflare tunnel.' }
-  ];
-  const oauthBrains = [
-    { id: 'google', name: 'Google OAuth', purpose: 'Gmail, Drive, Calendar, Docs, Sheets, Slides.', url: 'https://console.cloud.google.com/apis/credentials', auth: 'OAuth client ID' },
-    { id: 'github', name: 'GitHub OAuth/PAT', purpose: 'Repos, issues, PRs, Actions, projects.', url: 'https://github.com/settings/tokens', auth: 'PAT or OAuth app' },
-    { id: 'microsoft', name: 'Microsoft OAuth', purpose: 'Outlook, Teams, SharePoint, Azure.', url: 'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade', auth: 'Azure app registration' },
-    { id: 'slack', name: 'Slack OAuth', purpose: 'Workspace channels, DMs, files, commands.', url: 'https://api.slack.com/apps', auth: 'Slack app OAuth' },
-    { id: 'claude-desktop', name: 'Claude Desktop MCP', purpose: 'Import Claude Desktop MCP config into ABUZ8.', url: 'https://claude.ai/download', auth: 'Claude Desktop local config' },
-    { id: 'docker-mcp', name: 'Docker Desktop MCP', purpose: 'Import Docker MCP gateway when Docker Desktop supports it.', url: 'https://docs.docker.com/ai/mcp-catalog-and-toolkit/toolkit/', auth: 'Docker Desktop local gateway' }
-  ];
-  const cloudBrains = [
-    { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys', key_env: 'OPENAI_API_KEY', purpose: 'General reasoning, vision, audio, image generation.' },
-    { id: 'anthropic', name: 'Anthropic', url: 'https://console.anthropic.com/settings/keys', key_env: 'ANTHROPIC_API_KEY', purpose: 'Claude cloud reasoning and coding.' },
-    { id: 'google-ai', name: 'Google AI Studio', url: 'https://aistudio.google.com/app/apikey', key_env: 'GOOGLE_API_KEY', purpose: 'Gemini cloud reasoning and multimodal work.' },
-    { id: 'azure-foundry', name: 'Azure AI Foundry', url: 'https://ai.azure.com/', key_env: 'AZURE_OPENAI_API_KEY', purpose: 'Enterprise OpenAI deployments, agents, evals.' },
-    { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/keys', key_env: 'OPENROUTER_API_KEY', purpose: 'One key for many hosted models.' },
-    { id: 'hyperbrowser', name: 'Hyperbrowser', url: 'https://app.hyperbrowser.ai/dashboard/api-keys', key_env: 'HYPERBROWSER_API_KEY', purpose: 'Hosted visible browser automation.' }
-  ];
-  const agents = [
-    { id: 'operator', name: 'Operator', detail: 'Desktop actions, file work, app launching, verification.', recommended: true },
-    { id: 'researcher', name: 'Researcher', detail: 'Searches web, opens sources, summarizes, then creates from evidence.' },
-    { id: 'builder', name: 'Builder', detail: 'Creates tools, skills, connectors, and app changes.' },
-    { id: 'creator', name: 'Creator', detail: 'Image/video/social workflows with local or cloud rendering.' }
-  ];
-  return { ok: true, probe, checks, localModelPlan, agents, localRuntimes, cliTools, oauthBrains, cloudBrains, official_links_note: 'Links point to vendor documentation/download pages so the target PC receives current installers.' };
+// Known port → service hints for the system map. Real detection still requires
+// the port to be listening; this only labels what is found.
+const PORT_HINTS = {
+  '8900': 'ABUZ8 OS Portable Core (this app)',
+  '8902': 'ABUZ8 embedded LFM brain (llama.cpp)',
+  '1234': 'LM Studio (OpenAI-compatible)',
+  '11434': 'Ollama',
+  '8188': 'ComfyUI',
+  '9119': 'Hermes Agent gateway',
+  '18789': 'OpenClaw gateway',
+  '8910': 'Mission Agent',
+  '3000': 'Dev server (Node/React)',
+  '5173': 'Vite dev server',
+  '8000': 'HTTP dev server',
+  '8080': 'HTTP / proxy',
+  '5432': 'PostgreSQL',
+  '3306': 'MySQL/MariaDB',
+  '6379': 'Redis',
+  '27017': 'MongoDB',
+  '9000': 'MinIO / PHP-FPM',
+  '7860': 'Gradio',
+  '5000': 'Flask / HTTP',
+  '4000': 'Dev server',
+  '3001': 'Dev server'
+};
+
+// CLIs ABUZ8 can drive. Each probe is a fast version check.
+const CLI_CATALOG = [
+  { id: 'node', cmd: 'node', args: ['--version'], label: 'Node.js' },
+  { id: 'npm', cmd: 'npm', args: ['--version'], label: 'npm' },
+  { id: 'npx', cmd: 'npx', args: ['--version'], label: 'npx' },
+  { id: 'python', cmd: 'python', args: ['--version'], label: 'Python' },
+  { id: 'pip', cmd: 'pip', args: ['--version'], label: 'pip' },
+  { id: 'uv', cmd: 'uv', args: ['--version'], label: 'uv' },
+  { id: 'uvx', cmd: 'uvx', args: ['--version'], label: 'uvx' },
+  { id: 'git', cmd: 'git', args: ['--version'], label: 'Git' },
+  { id: 'gh', cmd: 'gh', args: ['--version'], label: 'GitHub CLI' },
+  { id: 'docker', cmd: 'docker', args: ['--version'], label: 'Docker' },
+  { id: 'kubectl', cmd: 'kubectl', args: ['version', '--client'], label: 'kubectl' },
+  { id: 'aws', cmd: 'aws', args: ['--version'], label: 'AWS CLI' },
+  { id: 'gcloud', cmd: 'gcloud', args: ['--version'], label: 'gcloud' },
+  { id: 'az', cmd: 'az', args: ['version'], label: 'Azure CLI' },
+  { id: 'terraform', cmd: 'terraform', args: ['version'], label: 'Terraform' },
+  { id: 'ollama', cmd: 'ollama', args: ['--version'], label: 'Ollama CLI' },
+  { id: 'ffmpeg', cmd: 'ffmpeg', args: ['-version'], label: 'FFmpeg' },
+  { id: 'curl', cmd: 'curl', args: ['--version'], label: 'curl' },
+  { id: 'pwsh', cmd: 'pwsh', args: ['--version'], label: 'PowerShell 7' },
+  { id: 'cargo', cmd: 'cargo', args: ['--version'], label: 'Rust/Cargo' },
+  { id: 'go', cmd: 'go', args: ['version'], label: 'Go' },
+  { id: 'java', cmd: 'java', args: ['-version'], label: 'Java' },
+  { id: 'dotnet', cmd: 'dotnet', args: ['--version'], label: '.NET' },
+  { id: 'code', cmd: 'code', args: ['--version'], label: 'VS Code' },
+  { id: 'cursor', cmd: 'cursor', args: ['--version'], label: 'Cursor' },
+  { id: 'claude', cmd: 'claude', args: ['--version'], label: 'Claude Code' },
+  { id: 'gemini', cmd: 'gemini', args: ['--version'], label: 'Gemini CLI' },
+  { id: 'codex', cmd: 'codex', args: ['--version'], label: 'OpenAI Codex CLI' },
+  { id: 'lms', cmd: 'lms', args: ['version'], label: 'LM Studio CLI' },
+  { id: 'wsl', cmd: 'wsl', args: ['--version'], label: 'WSL' },
+  { id: 'wrangler', cmd: 'wrangler', args: ['--version'], label: 'Cloudflare Wrangler' }
+];
+
+function scanListeningPorts() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      return execFile('bash', ['-lc', "ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null"], { timeout: 6000 }, (e, out) => resolve(parseUnixPorts(String(out || ''))));
+    }
+    execFile('netstat', ['-ano', '-p', 'TCP'], { windowsHide: true, timeout: 8000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      const seen = new Map();
+      for (const line of String(stdout).split(/\r?\n/)) {
+        const m = line.trim().match(/^TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)/i);
+        if (!m) continue;
+        const [, addr, port, pid] = m;
+        if (addr.startsWith('[') && addr !== '[::]' && addr !== '[::1]') {}
+        const key = port;
+        if (!seen.has(key)) seen.set(key, { port: Number(port), addr, pid: Number(pid) });
+      }
+      resolve(Array.from(seen.values()));
+    });
+  });
 }
 
-async function autoProbeDevice() {
-  const probe = await machineProbe();
-  const profile = {
-    ok: true,
-    probed_at: new Date().toISOString(),
-    host_fingerprint: crypto.createHash('sha256')
-      .update([probe.system?.hostname, probe.system?.os_release, probe.cpu?.name, probe.memory?.total_gb].join('|'))
-      .digest('hex')
-      .slice(0, 16),
-    device: {
-      tier: probe.tier,
-      headline: probe.headline,
-      system: probe.system,
-      cpu: probe.cpu,
-      memory: probe.memory,
-      storage: probe.storage,
-      gpus: probe.gpus,
-      connectors: probe.connectors
-    },
-    capabilities: probe.capabilities,
-    recommended: probe.recommended,
-    data_root: dataRoot
-  };
-  const profileFile = path.join(dataRoot, 'mission', 'device-profile.json');
-  writeJson(profileFile, profile);
-  try {
-    upsertMissionTask({
-      id: 'auto-probe-current-device',
-      title: `Auto-probe ${probe.system?.hostname || 'current device'}`,
-      column: 'ready',
-      priority: 'medium',
-      owner: 'ABUZ8 OS Agent',
-      details: `${probe.headline} ${probe.cpu?.name || 'CPU'} · ${probe.memory?.total_gb || '?'}GB RAM · data root ${dataRoot}`
+function parseUnixPorts(out) {
+  const rows = [];
+  for (const line of out.split(/\r?\n/)) {
+    const m = line.match(/:(\d+)\s+.*LISTEN/);
+    if (m) rows.push({ port: Number(m[1]), addr: '0.0.0.0', pid: 0 });
+  }
+  return rows;
+}
+
+function mapPidsToNames(pids) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32' || !pids.length) return resolve({});
+    execFile('tasklist', ['/fo', 'csv', '/nh'], { windowsHide: true, timeout: 8000 }, (err, stdout) => {
+      const map = {};
+      if (!err) {
+        for (const line of String(stdout).split(/\r?\n/)) {
+          const cols = line.split('","').map((c) => c.replace(/^"|"$/g, ''));
+          if (cols.length >= 2) map[cols[1]] = cols[0];
+        }
+      }
+      resolve(map);
     });
-  } catch {}
-  appendJsonl(memoryFile(), {
-    id: `device-probe-${Date.now().toString(36)}`,
-    type: 'device_probe',
-    content: `Current device auto-probed: ${probe.headline} ${probe.cpu?.name || 'CPU'} · ${probe.memory?.total_gb || '?'}GB RAM.`,
-    hostname: probe.system?.hostname,
-    tier: probe.tier,
-    timestamp: new Date().toISOString()
   });
-  return { ...profile, file: profileFile, mission_summary: missionSummary(readMissionBoard()) };
+}
+
+async function discoverClis() {
+  const results = await Promise.all(CLI_CATALOG.map(async (c) => {
+    const probe = await runCommand(c.cmd, c.args, 5000);
+    const version = (probe.stdout || probe.stderr || '').split(/\r?\n/).find((l) => l.trim()) || '';
+    return { id: c.id, label: c.label, command: c.cmd, available: probe.ok, version: probe.ok ? version.trim().slice(0, 80) : null };
+  }));
+  return results;
+}
+
+async function systemScan() {
+  const rawPorts = await scanListeningPorts();
+  const pidNames = await mapPidsToNames([...new Set(rawPorts.map((p) => String(p.pid)))]);
+  const ports = rawPorts
+    .sort((a, b) => a.port - b.port)
+    .map((p) => ({
+      port: p.port,
+      address: p.addr,
+      pid: p.pid,
+      process: pidNames[String(p.pid)] || null,
+      service: PORT_HINTS[String(p.port)] || null,
+      local: p.addr === '127.0.0.1' || p.addr === '0.0.0.0' || p.addr === '[::]' || p.addr === '[::1]'
+    }));
+  const clis = await discoverClis();
+  const endpoints = APP_ENDPOINTS;
+  const probe = await machineProbe();
+  return {
+    ok: true,
+    scanned_at: new Date().toISOString(),
+    host: probe.system,
+    cpu: probe.cpu,
+    memory: probe.memory,
+    storage: probe.storage,
+    gpus: probe.gpus,
+    tier: probe.tier,
+    ports,
+    port_count: ports.length,
+    clis,
+    cli_available: clis.filter((c) => c.available).length,
+    endpoints,
+    embedded_brain: probe.embedded_brain
+  };
+}
+
+// Self-describing catalog of this app's own HTTP endpoints, for the System map.
+const APP_ENDPOINTS = [
+  { method: 'POST', path: '/api/chat', desc: 'Chat with the active brain/agent role' },
+  { method: 'GET', path: '/api/system/scan', desc: 'Scan ports, CLIs, endpoints, hardware' },
+  { method: 'GET', path: '/api/agents/roles', desc: 'List predefined agent roles' },
+  { method: 'GET', path: '/api/device/probe', desc: 'Hardware and capability probe' },
+  { method: 'GET', path: '/api/brains/list', desc: 'List local brain models' },
+  { method: 'POST', path: '/api/brains/select', desc: 'Switch active brain tier' },
+  { method: 'GET', path: '/api/tools/list', desc: 'List built-in and custom tools' },
+  { method: 'POST', path: '/api/tools/call', desc: 'Execute a tool by name' },
+  { method: 'POST', path: '/api/tools/create', desc: 'Create a custom local tool' },
+  { method: 'GET', path: '/api/mcp/servers', desc: 'List MCP servers' },
+  { method: 'GET', path: '/api/mcp/servers/:name/tools', desc: 'List an MCP server’s tools' },
+  { method: 'POST', path: '/api/mcp/call', desc: 'Call an MCP tool' },
+  { method: 'POST', path: '/api/cli/probe', desc: 'Run a local CLI command (consent)' },
+  { method: 'GET', path: '/api/memory/recent', desc: 'Recent local memory' },
+  { method: 'POST', path: '/api/memory/write', desc: 'Write a memory note' },
+  { method: 'GET', path: '/api/providers', desc: 'List model providers' },
+  { method: 'POST', path: '/api/providers', desc: 'Add or update a provider' },
+  { method: 'POST', path: '/api/swarm/run', desc: 'Run a multi-agent swarm on a goal' },
+  { method: 'POST', path: '/api/content/generate', desc: 'Generate carousel/thread/script/SEO content' },
+  { method: 'POST', path: '/api/x/post', desc: 'Post to X (needs OAuth2 token)' },
+  { method: 'POST', path: '/api/growth/seed', desc: 'Seed the 25-problems X growth board' },
+  { method: 'GET', path: '/api/skills/installed', desc: 'List migrated skill packs' },
+  { method: 'GET', path: '/api/bridge/status', desc: 'Claude Desktop two-way bridge status' },
+  { method: 'POST', path: '/api/bridge/reinstall', desc: 'Reinstate the Claude Desktop symbiosis' },
+  { method: 'GET', path: '/api/mission/board', desc: 'Kanban board (delegation)' }
+];
+
+// ── Multi-agent swarm: run several roles on one task, then synthesize. Real,
+// sequential calls through the same reply ladder (brain or providers). ──
+async function runSwarm(task, roleIds = []) {
+  const goal = String(task || '').trim();
+  if (!goal) throw new Error('task is required');
+  const roles = (roleIds && roleIds.length ? roleIds : ['research-analyst', 'systems-engineer', 'content-producer'])
+    .map((id) => AGENT_ROLES.find((r) => r.id === id)).filter(Boolean);
+  const workers = [];
+  for (const role of roles) {
+    const r = await reasonReply(`Goal: ${goal}\n\nContribute your part as the ${role.name}. Be specific and actionable.`, { role: role.id });
+    workers.push({ role: role.id, name: role.name, output: r.text, brain: r.brain });
+  }
+  const merged = workers.map((w) => `### ${w.name}\n${w.output}`).join('\n\n');
+  const synth = await reasonReply(`You are the synthesis agent. Goal: ${goal}\n\nThe specialized agents reported:\n\n${merged}\n\nReconcile their work into one coherent, deduplicated plan with clear next steps.`, { role: 'swarm-orchestrator' });
+  return { ok: true, goal, agents: workers, synthesis: synth.text, brain: synth.brain };
+}
+
+// Salvage a tool call from messy small-model output (handles malformed JSON
+// like {"tool":"web_search {\"q\":...}"} by finding a known tool name + an arg).
+function salvageToolCall(raw) {
+  const text = String(raw || '');
+  for (const t of KNOWN_AGENT_TOOLS) {
+    if (new RegExp('\\b' + t + '\\b', 'i').test(text)) {
+      const after = text.slice(text.toLowerCase().indexOf(t));
+      let args = {};
+      const argMatch = after.match(/\{[\s\S]*\}/);
+      if (argMatch) { try { args = JSON.parse(argMatch[0]); } catch {} }
+      if (!Object.keys(args).length) {
+        const kv = text.match(/"(q|query|command|url|site|content|topic|name|goal)"\s*:\s*"([^"]+)"/i);
+        const bare = text.match(new RegExp(t + '[^a-z0-9]+([^\\n"}{]{2,80})', 'i'));
+        const val = kv ? kv[2] : (bare ? bare[1].trim() : '');
+        if (val) args = { q: val, command: val, content: val, url: val, topic: val, name: val };
+      }
+      return { tool: t, args };
+    }
+  }
+  return null;
+}
+
+// ── Autonomous agent loop (ReAct-style): plan → act → observe → repeat. ──
+// Grounded in the common agentic pattern used by AutoGPT/Manus/OpenHands/CrewAI:
+// a thinking model emits one tool call at a time; the loop executes it and feeds
+// the result back until the goal is met or a step budget is hit.
+async function runAgentLoop(goal, opts = {}) {
+  const maxSteps = Math.max(1, Math.min(Number(opts.max_steps || 6), 12));
+  const steps = [];
+  let history = '';
+  agentRunning = true;
+  pushActivity('plan', 'Autopilot started', goal);
+  const toolList = [
+    'web_search {"q":"..."}', 'open_url {"url" or "site":"...","browser":"chrome?"}', 'open_app {"name":"chrome|notepad|..."}',
+    'cmd_run {"command":"..."}', 'file_write {"relpath":"...","content":"..."}', 'screenshot {}',
+    'abuz8_memory_write {"content":"..."}', 'content_generate {"topic":"...","format":"x-carousel|youtube-script|..."}',
+    'abuz8_device_probe {}'
+  ];
+  for (let i = 0; i < maxSteps; i++) {
+    const planPrompt = [
+      `GOAL: ${goal}`,
+      history ? `Progress so far:\n${history}` : 'No actions taken yet.',
+      `Choose the SINGLE next tool. Available: ${toolList.join(' | ')}`,
+      'Reply with ONLY one compact JSON object: {"tool":"<name>","args":{...}}  — or if the goal is done: {"done":true,"answer":"..."}'
+    ].join('\n\n');
+    // Route through the reply ladder so a configured cloud provider (far better at
+    // this) is used when present; otherwise the local brain.
+    let raw = '';
+    try { const r = await reasonReply(planPrompt, { system: 'You are a precise tool-planning engine. Output ONLY one JSON object and nothing else.' }); raw = r.text || ''; } catch {}
+    const obj = extractJsonObject(raw) || {};
+    if (obj.done || /"done"\s*:\s*true/.test(raw)) {
+      agentRunning = false; pushActivity('done', 'Autopilot finished', obj.answer || 'Goal completed.');
+      return { ok: true, goal, steps, final: obj.answer || obj.final || 'Goal completed.', stopped: 'done' };
+    }
+    let call = parseAgentToolCall(raw) || salvageToolCall(raw);
+    if (!call || !KNOWN_AGENT_TOOLS.has(slug(call.tool).replace(/-/g, '_'))) {
+      const txt = String(raw).replace(/[`*]/g, '').trim();
+      agentRunning = false; pushActivity('done', 'Autopilot finished', txt.slice(0, 80));
+      return { ok: true, goal, steps, final: txt || 'Done.', stopped: steps.length ? 'answer' : 'no-tool', note: steps.length ? undefined : 'The local brain did not emit a usable tool call. Configure a cloud provider or a larger model for reliable autonomous loops.' };
+    }
+    const toolName = slug(call.tool).replace(/-/g, '_');
+    pushActivity('step', `Step ${i + 1}: ${toolName}`, JSON.stringify(call.args || {}).slice(0, 100));
+    let observation;
+    try {
+      const result = await callLocalTool(toolName, call.args || {});
+      observation = summarizeToolResult(toolName, result).slice(0, 600);
+    } catch (e) { observation = `ERROR: ${e.message}`; }
+    steps.push({ n: i + 1, tool: toolName, args: call.args || {}, observation });
+    pushActivity('observe', `↳ ${toolName} result`, observation.slice(0, 120));
+    history += `Step ${i + 1}: ${toolName}(${JSON.stringify(call.args || {})}) -> ${observation}\n`;
+  }
+  agentRunning = false; pushActivity('done', 'Autopilot reached step limit', '');
+  return { ok: true, goal, steps, final: 'Reached the step limit. Here is what I accomplished above.', stopped: 'max_steps' };
+}
+
+const CONTENT_FORMATS = {
+  'x-carousel': 'Produce a 10-slide X carousel. Slide 1 Hook (bold claim/question); Slide 2 Problem; Slide 3 Why it matters; Slide 4 Mental model; Slides 5-8 Steps with concrete detail; Slide 9 TL;DR one-sentence recap; Slide 10 CTA. Label each slide.',
+  'x-thread': 'Produce an X thread of 7-12 tweets. Tweet 1 is a scroll-stopping hook. Each subsequent tweet is self-contained, under 280 chars. End with a CTA.',
+  'youtube-script': 'Produce a YouTube script: a 15-second hook, an outline of beats, the spoken narration per beat, B-roll/visual cues in brackets, and an end-screen CTA.',
+  'blog-outline': 'Produce an SEO blog outline: working title, target keyword + 4 secondary keywords, meta description, H2/H3 structure with one-line notes each, and an internal-link suggestion list.',
+  'notebook-synthesis': 'Act as a research-to-media synthesizer: extract the core thesis, the 5 key supporting points, notable quotes/stats to verify, and a one-paragraph executive summary. Mark anything that needs source verification.'
+};
+
+async function generateContent(body = {}) {
+  const topic = String(body.topic || body.content || body.prompt || '').trim();
+  if (!topic) throw new Error('topic is required');
+  const format = String(body.format || 'x-carousel');
+  const spec = CONTENT_FORMATS[format] || CONTENT_FORMATS['x-carousel'];
+  const sources = body.sources ? `\n\nSource material:\n${String(body.sources).slice(0, 6000)}` : '';
+  const prompt = `${spec}\n\nTopic: ${topic}${sources}`;
+  const r = await reasonReply(prompt, { role: format === 'blog-outline' ? 'seo-strategist' : 'content-producer' });
+  const id = `${format}-${slug(topic).slice(0, 40)}`;
+  const file = path.join(safeMkdir(path.join(dataRoot, 'exports', 'content')), `${id}.md`);
+  try { fs.writeFileSync(file, `# ${topic}\n\n_Format: ${format} · ${new Date().toISOString()}_\n\n${r.text}`, 'utf8'); } catch {}
+  return { ok: true, format, topic, content: r.text, brain: r.brain, saved_to: file };
+}
+
+// X (Twitter) post via API v2. Requires a user OAuth2 token with tweet.write —
+// stored in settings as x_access_token. App-only bearer tokens cannot post; we
+// say so honestly rather than pretend success.
+async function xPost(body = {}) {
+  const t = String(body.text || body.content || '').trim();
+  if (!t) throw new Error('text is required');
+  const settings = readJson(settingsPath(), {});
+  const token = body.access_token || settings.x_access_token || process.env.X_ACCESS_TOKEN;
+  if (!token) {
+    return { ok: false, needs_credentials: true, error: 'No X access token configured. Add an OAuth2 user token with tweet.write scope in Settings → X. App-only/bearer tokens cannot post.' };
+  }
+  try {
+    const resp = await fetchUrl('https://api.twitter.com/2/tweets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ text: t.slice(0, 280) })
+    });
+    const data = JSON.parse(resp || '{}');
+    if (data.errors || data.status >= 400 || data.title) {
+      return { ok: false, error: (data.detail || data.title || JSON.stringify(data)), raw: data };
+    }
+    return { ok: true, id: data.data?.id, text: data.data?.text };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Seed the mission board with the migrated X-growth protocol: the 25-problems
+// weekly rule plus a 7-day content cadence. Creates real tasks on the board.
+function seedGrowthBoard() {
+  const created = [];
+  const now = new Date().toISOString();
+  upsertMissionTask({ id: 'x-rule-25', title: 'X Signature Rule: publicly solve 25 hard problems this week', column: 'doing', priority: 'high', owner: 'x-growth-operator', details: 'Each problem solved publicly on X with your signature. Log impressions in the tracker.' });
+  created.push('x-rule-25');
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const cadence = ['Carousel (10 slides)', 'Thread (problem solved live)', 'Short tweet + proof screenshot'];
+  days.forEach((d) => cadence.forEach((c, i) => {
+    const id = `x-${d.toLowerCase()}-${i}`;
+    upsertMissionTask({ id, title: `${d}: ${c}`, column: 'ready', priority: 'medium', owner: 'content-producer', details: 'Auto-seeded from x-growth-monetization 7-day cadence.' });
+    created.push(id);
+  }));
+  upsertMissionTask({ id: 'rev-track', title: 'Revenue tracker: log ad-share, product, affiliate, sponsorship income', column: 'backlog', priority: 'high', owner: 'ceo-operator', details: 'Revenue-first triage: review weekly.' });
+  created.push('rev-track');
+  return { ok: true, created, board: readMissionBoard() };
+}
+
+// Read migrated skills from the skills dir (markdown SKILL.md + json definitions).
+function listSkills() {
+  const root = path.join(dataRoot, 'skills');
+  const skills = [];
+  if (exists(root)) {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const skillMd = path.join(root, entry.name, 'SKILL.md');
+        let name = entry.name, desc = '';
+        if (exists(skillMd)) {
+          const head = fs.readFileSync(skillMd, 'utf8').slice(0, 800);
+          const nm = head.match(/name:\s*([^\n]+)/i); if (nm) name = nm[1].trim().replace(/['"]/g, '');
+          const dm = head.match(/description:\s*([^\n]+)/i); if (dm) desc = dm[1].trim().replace(/['"]/g, '');
+        }
+        const refs = exists(path.join(root, entry.name, 'references')) ? fs.readdirSync(path.join(root, entry.name, 'references')).length : 0;
+        skills.push({ id: entry.name, name, description: desc, kind: 'skill-pack', references: refs });
+      } else if (entry.name.endsWith('.json')) {
+        const j = readJson(path.join(root, entry.name), {});
+        skills.push({ id: entry.name.replace(/\.json$/, ''), name: j.name || entry.name, description: j.description || '', kind: 'definition' });
+      }
+    }
+  }
+  return skills;
+}
+
+// ── Two-way Claude Desktop symbiosis ──
+// Direction A (Claude → ABUZ8): the stdio symbiote, self-healed on startup.
+// Direction B (ABUZ8 → Claude's tools): import Claude Desktop's MCP servers so
+// ABUZ8 runs the same tool fleet through its own MCP client.
+function bridgeStatus() {
+  const claudeCfgFile = claudeConfigPath();
+  const claudeCfg = readJson(claudeCfgFile, { mcpServers: {} });
+  const symbiote = claudeCfg.mcpServers && claudeCfg.mcpServers.abuz8_os ? claudeCfg.mcpServers.abuz8_os : null;
+  const bridge = persistentClaudeBridge();
+  const localMcp = readJson(mcpConfigPath(), { mcpServers: {} });
+  const importedFromClaude = Object.entries(localMcp.mcpServers || {}).filter(([, s]) => s.source === 'claude-desktop').map(([n]) => n);
+  return {
+    ok: true,
+    claude_to_abuz8: { installed: Boolean(symbiote), config: claudeCfgFile, bridge_present: exists(bridge.bridge), node_present: Boolean(bridge.node) },
+    abuz8_to_claude: { imported_servers: importedFromClaude, count: importedFromClaude.length, note: importedFromClaude.length ? 'ABUZ8 runs the same MCP servers Claude Desktop uses.' : 'No Claude Desktop MCP servers imported yet.' },
+    restart_claude_to_load: Boolean(symbiote)
+  };
+}
+
+function reinstateBridge() {
+  const installed = installClaudeSymbiote();
+  let imported = [];
+  try {
+    const file = claudeConfigPath();
+    if (exists(file)) {
+      const cfg = readJson(file, {});
+      // Import every Claude Desktop MCP server EXCEPT our own symbiote (avoid recursion).
+      const incoming = { ...(cfg.mcpServers || {}) };
+      delete incoming.abuz8_os;
+      imported = mergeMcpServers(incoming, 'claude-desktop');
+    }
+  } catch {}
+  try { imported = imported.concat(importClaudeExtensions()); } catch {}
+  try { imported = imported.concat(importAntigravity()); } catch {}
+  imported = [...new Set(imported)];
+  return { ok: true, symbiote: installed.server, claude_config: installed.file, imported, status: bridgeStatus() };
+}
+
+// ── Claude Desktop Extensions (.dxt) → spawnable MCP servers ────────────────
+// Desktop Commander, Windows-MCP, etc. install as extensions with a manifest
+// that declares the exact stdio command. Resolve ${__dirname}, drop unresolved
+// ${user_config.*} env entries, and register them as first-class MCP servers.
+function claudeExtensionsDir() {
+  return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Claude', 'Claude Extensions');
+}
+function specFromExtensionManifest(extDir, manifest) {
+  const mc = manifest && manifest.server && manifest.server.mcp_config;
+  if (!mc || !mc.command) return null;
+  const resolveVar = (v) => String(v).replace(/\$\{__dirname\}/g, extDir);
+  const env = {};
+  for (const [k, v] of Object.entries(mc.env || {})) {
+    const val = resolveVar(v);
+    if (/\$\{user_config\./.test(val)) continue; // user-config placeholder we cannot resolve
+    env[k] = val;
+  }
+  if ((mc.env || {}).ANONYMIZED_TELEMETRY) env.ANONYMIZED_TELEMETRY = 'false';
+  return {
+    command: resolveVar(mc.command),
+    args: (mc.args || []).map(resolveVar),
+    env,
+    enabled: true,
+    note: `Claude Desktop extension: ${manifest.display_name || manifest.name || path.basename(extDir)}`
+  };
+}
+function importClaudeExtensions() {
+  const root = claudeExtensionsDir();
+  if (!exists(root)) return [];
+  const incoming = {};
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const extDir = path.join(root, entry.name);
+    const manifest = readJson(path.join(extDir, 'manifest.json'), null);
+    if (!manifest) continue;
+    const spec = specFromExtensionManifest(extDir, manifest);
+    if (!spec) continue;
+    incoming[slug(manifest.name || entry.name.split('.').pop())] = spec;
+  }
+  return Object.keys(incoming).length ? mergeMcpServers(incoming, 'claude-extensions') : [];
+}
+
+// ── Antigravity (Google IDE) MCP configs ────────────────────────────────────
+function antigravityConfigPaths() {
+  const home = os.homedir();
+  const appdata = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  return [
+    path.join(appdata, 'Antigravity', 'User', 'mcp.json'),
+    path.join(home, '.gemini', 'config', 'mcp_config.json'),
+    path.join(home, '.gemini', 'antigravity', 'mcp_config.json'),
+    path.join(home, '.gemini', 'antigravity-ide', 'mcp_config.json')
+  ];
+}
+function importAntigravity() {
+  const merged = [];
+  for (const file of antigravityConfigPaths()) {
+    if (!exists(file)) continue;
+    const cfg = readJson(file, {});
+    const servers = cfg.mcpServers || cfg.servers || {};
+    if (Object.keys(servers).length) merged.push(...mergeMcpServers(servers, 'antigravity'));
+  }
+  return [...new Set(merged)];
+}
+
+// ── Open-weight model catalog (LM Studio / Anything-LLM style) ──
+// Curated GGUF models from Hugging Face, sized small→large so the OS can
+// recommend and download the most capable one this machine can actually run.
+const MODEL_CATALOG = [
+  { id: 'qwen2.5-0.5b', name: 'Qwen2.5 0.5B Instruct', repo: 'Qwen/Qwen2.5-0.5B-Instruct-GGUF', file: 'qwen2.5-0.5b-instruct-q4_k_m.gguf', params: '0.5B', size_gb: 0.5, min_ram_gb: 3, note: 'Ultra-light, runs on anything.' },
+  { id: 'llama3.2-1b', name: 'Llama 3.2 1B Instruct', repo: 'bartowski/Llama-3.2-1B-Instruct-GGUF', file: 'Llama-3.2-1B-Instruct-Q4_K_M.gguf', params: '1B', size_gb: 0.8, min_ram_gb: 4, note: 'Fast general assistant.' },
+  { id: 'qwen2.5-3b', name: 'Qwen2.5 3B Instruct', repo: 'Qwen/Qwen2.5-3B-Instruct-GGUF', file: 'qwen2.5-3b-instruct-q4_k_m.gguf', params: '3B', size_gb: 2.0, min_ram_gb: 8, note: 'Strong small all-rounder (good Arabic).' },
+  { id: 'nemotron-nano-4b', name: 'NVIDIA Nemotron 3 Nano 4B', repo: 'unsloth/NVIDIA-Nemotron-3-Nano-4B-GGUF', file: 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf', params: '4B', size_gb: 2.9, min_ram_gb: 8, note: 'NVIDIA edge model built for AGENTIC TOOL USE. Best sub-4GB tool caller (2026). temp 0.6 / top_p 0.95.' },
+  { id: 'phi4-mini', name: 'Microsoft Phi-4 Mini', repo: 'bartowski/Phi-4-mini-instruct-GGUF', file: 'Phi-4-mini-instruct-Q4_K_M.gguf', params: '3.8B', size_gb: 2.5, min_ram_gb: 8, note: 'Strong reasoning + tool use per size.' },
+  { id: 'gemma3-4b', name: 'Gemma 3 4B Instruct', repo: 'bartowski/google_gemma-3-4b-it-GGUF', file: 'google_gemma-3-4b-it-Q4_K_M.gguf', params: '4B', size_gb: 2.5, min_ram_gb: 8, note: 'Google Gemma 3, good tool calling + multilingual.' },
+  { id: 'phi3.5-mini', name: 'Phi-3.5 Mini Instruct', repo: 'bartowski/Phi-3.5-mini-instruct-GGUF', file: 'Phi-3.5-mini-instruct-Q4_K_M.gguf', params: '3.8B', size_gb: 2.4, min_ram_gb: 8, note: 'Great reasoning per size.' },
+  { id: 'llama3.1-8b', name: 'Llama 3.1 8B Instruct', repo: 'bartowski/Meta-Llama-3.1-8B-Instruct-GGUF', file: 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf', params: '8B', size_gb: 4.9, min_ram_gb: 12, note: 'Capable general model.' },
+  { id: 'qwen2.5-7b', name: 'Qwen2.5 7B Instruct', repo: 'Qwen/Qwen2.5-7B-Instruct-GGUF', file: 'qwen2.5-7b-instruct-q4_k_m.gguf', params: '7B', size_gb: 4.7, min_ram_gb: 12, note: 'Top-tier 7B for tools & code.' },
+  { id: 'qwen2.5-coder-7b', name: 'Qwen2.5 Coder 7B', repo: 'Qwen/Qwen2.5-Coder-7B-Instruct-GGUF', file: 'qwen2.5-coder-7b-instruct-q4_k_m.gguf', params: '7B', size_gb: 4.7, min_ram_gb: 12, note: 'Best small coding model.' },
+  { id: 'deepseek-r1-8b', name: 'DeepSeek-R1 Distill 8B', repo: 'bartowski/DeepSeek-R1-Distill-Llama-8B-GGUF', file: 'DeepSeek-R1-Distill-Llama-8B-Q4_K_M.gguf', params: '8B', size_gb: 4.9, min_ram_gb: 14, note: 'Reasoning-focused.' },
+  { id: 'mistral-nemo-12b', name: 'Mistral Nemo 12B', repo: 'bartowski/Mistral-Nemo-Instruct-2407-GGUF', file: 'Mistral-Nemo-Instruct-2407-Q4_K_M.gguf', params: '12B', size_gb: 7.1, min_ram_gb: 16, note: 'Strong, 128k context.' },
+  { id: 'qwen2.5-14b', name: 'Qwen2.5 14B Instruct', repo: 'Qwen/Qwen2.5-14B-Instruct-GGUF', file: 'qwen2.5-14b-instruct-q4_k_m.gguf', params: '14B', size_gb: 9.0, min_ram_gb: 20, note: 'Near-frontier local quality.' },
+  { id: 'qwen2.5-32b', name: 'Qwen2.5 32B Instruct', repo: 'Qwen/Qwen2.5-32B-Instruct-GGUF', file: 'qwen2.5-32b-instruct-q4_k_m.gguf', params: '32B', size_gb: 19.8, min_ram_gb: 32, note: 'Heavy workstation model.' }
+];
+
+async function modelCatalog() {
+  const totalGb = os.totalmem() / 1024 / 1024 / 1024;
+  const gpus = await detectGpuNames();
+  const usable = totalGb * 0.6; // leave headroom for the OS + app
+  const downloaded = new Set(listDownloadedModels().map((m) => m.name.toLowerCase()));
+  const rows = MODEL_CATALOG.map((m) => ({
+    ...m,
+    runnable: m.min_ram_gb <= totalGb,
+    comfortable: m.min_ram_gb <= usable,
+    installed: downloaded.has(m.file.toLowerCase())
+  }));
+  // Recommend the largest comfortable model.
+  const best = rows.filter((m) => m.comfortable).sort((a, b) => b.min_ram_gb - a.min_ram_gb)[0];
+  if (best) best.recommended = true;
+  return { ok: true, device: { ram_gb: Math.round(totalGb), gpus }, recommended_id: best?.id || null, models: rows };
 }
 
 async function route(req, res) {
   const { pathname, searchParams } = splitPath(req.url);
   if (req.method === 'OPTIONS') return text(res, 204, '');
 
+  // ── LAN auth gate ── When LAN access is on, any request NOT from localhost
+  // must carry the access key. The command-execution API is RCE-capable, so
+  // unauthenticated LAN exposure is never allowed. Localhost (the desktop app)
+  // is always trusted; the app shell + health load unauthenticated so the phone
+  // can fetch the page and then authenticate with the key in its URL.
+  try {
+    const s0 = readJson(settingsPath(), {});
+    if (s0.lan_access === true && !isLocalRequest(req)) {
+      const openPaths = ['/', '/app', '/index.html', '/health', '/mobile', '/mobile.html', '/manifest.json', '/sw.js', '/verify.html'];
+      if (!openPaths.includes(pathname)) {
+        const key = req.headers['x-abuz8-key'] || searchParams.get('key') || '';
+        if (!s0.lan_token || key !== s0.lan_token) {
+          return json(res, 401, { ok: false, error: 'This ABUZ8 instance requires the LAN access key. Open the /app link that includes ?key=…' });
+        }
+      }
+    }
+  } catch {}
+
   if (pathname === '/tui') return sendTui(res);
-  if (pathname === '/' || pathname === '/health') {
+  if (pathname === '/health') {
     return json(res, 200, { ok: true, service: 'portable-core', port: PORT, data_root: dataRoot });
+  }
+  // Serve the dashboard over HTTP so a phone/tablet on the LAN can use it.
+  if (pathname === '/' || pathname === '/app' || pathname === '/index.html') {
+    const html = readRendererHtml();
+    if (html) return text(res, 200, html, 'text/html; charset=utf-8');
+    return json(res, 200, { ok: true, service: 'portable-core', note: 'Renderer not found on disk; use the desktop window.' });
+  }
+  // Serve the mobile PWA shell + its assets so a phone on the LAN can install it.
+  if (pathname === '/mobile' || pathname === '/mobile.html' || pathname === '/manifest.json' || pathname === '/sw.js' || pathname === '/verify.html' || pathname.startsWith('/renderer/')) {
+    const rel = pathname === '/mobile' ? 'mobile.html' : pathname.replace(/^\/renderer\//, '').replace(/^\//, '');
+    if (serveRendererFile(res, rel)) return;
+    return json(res, 404, { ok: false, error: `Asset not found: ${rel}` });
+  }
+  if (pathname === '/api/lan/status') {
+    const s = readJson(settingsPath(), {});
+    return json(res, 200, { ok: true, enabled: s.lan_access === true, key: s.lan_access ? s.lan_token : undefined, urls: lanUrls(s.lan_access ? s.lan_token : ''), bound: serverHost });
+  }
+  if (pathname === '/api/lan/toggle') {
+    const body = await getBody(req);
+    const s = readJson(settingsPath(), {});
+    s.lan_access = body.enabled === true;
+    if (s.lan_access && !s.lan_token) s.lan_token = crypto.randomBytes(5).toString('hex'); // 10-char PIN
+    s.updated_at = new Date().toISOString();
+    writeJson(settingsPath(), s);
+    await rebindServer(s.lan_access ? '0.0.0.0' : '127.0.0.1');
+    return json(res, 200, { ok: true, enabled: s.lan_access, key: s.lan_access ? s.lan_token : undefined, urls: lanUrls(s.lan_access ? s.lan_token : ''), bound: serverHost });
   }
   if (pathname === '/api/status') {
     const embedded = embeddedBrainStatus();
+    const extStatus = activeExternalDescriptor();
+    const brainName = extStatus ? `${extStatus.backend} · ${extStatus.model}` : (embedded.embedded ? embedded.name : 'Portable Core');
     return json(res, 200, {
       ok: true,
-      service: 'abuz8-agent-core',
-      primary_brain: embedded.embedded ? embedded.name : 'Local reasoning engine',
-      brain: 'ABUZ8 OS Agent',
-      agent: 'ABUZ8 OS Agent',
+      service: 'portable-core',
+      primary_brain: brainName,
+      brain: brainName,
       latency_ms: 1,
       memory_count: readMemory(200).length,
       data_root: dataRoot,
       mcp_config: mcpConfigPath(),
-      current_time: new Date().toISOString(),
       embedded_brain: embedded
     });
   }
@@ -2224,9 +3052,14 @@ async function route(req, res) {
     const body = await getBody(req);
     const prompt = body.content || body.message || body.prompt || body.raw;
     const agentic = body.agentic !== false;
-    const result = agentic
-      ? await agenticReply(prompt, body)
-      : { response: await embeddedReply(prompt) || localReply(prompt), modelResponse: null, fallback: false };
+    pushActivity('chat', 'You', String(prompt || '').slice(0, 100));
+    let result;
+    if (agentic) {
+      result = await agenticReply(prompt, body);
+    } else {
+      const r = await reasonReply(prompt, { provider: body.provider, role: body.role });
+      result = { response: r.text, modelResponse: r.model ? r.text : null, brain: r.brain, fallback: r.fallback };
+    }
     const response = result.response;
     appendJsonl(memoryFile(), {
       id: crypto.randomUUID(),
@@ -2238,12 +3071,12 @@ async function route(req, res) {
       timestamp: new Date().toISOString()
     });
     const embedded = embeddedBrainStatus();
-    if (pathname.endsWith('/stream')) return sendSse(res, response, 'ABUZ8 OS Agent');
+    const brainLabel = result.brain || (result.modelResponse ? embedded.name : 'Portable Core');
+    if (pathname.endsWith('/stream')) return sendSse(res, response, brainLabel);
     return json(res, 200, {
       ok: true,
       response,
-      brain: 'ABUZ8 OS Agent',
-      reasoning_engine: result.modelResponse ? embedded.name : 'Portable Core',
+      brain: brainLabel,
       latency_ms: result.modelResponse ? null : 1,
       embedded_brain: embedded,
       fallback: Boolean(result.fallback),
@@ -2266,107 +3099,18 @@ async function route(req, res) {
       model_file: b.model_file,
       role: b.role
     }));
+    const external = await detectExternalBrains();
+    const activeExtId = activeExternalDescriptor()?.id || null;
+    const externalBrains = external.map((b) => ({
+      id: b.id, name: b.name, status: 'ready', alive: activeExtId === b.id,
+      kind: b.kind, backend: b.backend, endpoint: b.endpoint, size_mb: b.size_mb || 0
+    }));
     const brains = [
       { id: 'portable-core', name: 'Portable Core', status: 'online', alive: true, kind: 'Portable Core', port: PORT, models: ['portable-core'] },
-      ...lfmBrains
+      ...lfmBrains,
+      ...externalBrains
     ];
-    return json(res, 200, { ok: true, brains, local: brains, cloud: [] });
-  }
-  // Jarvis multi-brain endpoints
-  if (pathname === '/api/brains/pool') {
-    await refreshBrainPoolAlive();
-    return json(res, 200, {
-      ok: true,
-      enabled: brainPoolEnabled,
-      pool: brainPoolStatus(),
-      ports: BRAIN_POOL_PORTS,
-      files: BRAIN_POOL_FILES
-    });
-  }
-  if (pathname === '/api/brains/pool/start') {
-    const body = await getBody(req).catch(() => ({}));
-    const strategy = body.strategy || 'auto';
-    const pool = await startBrainPool(strategy);
-    return json(res, 200, { ok: true, started: pool.length, pool: brainPoolStatus(), strategy });
-  }
-  if (pathname === '/api/route') {
-    const body = await getBody(req);
-    const text = body.content || body.message || body.prompt || body.raw || '';
-    if (!text) return json(res, 400, { ok: false, error: 'missing content' });
-    try {
-      const r = await routeRequest(text, { tier: body.tier, n_predict: body.n_predict, temperature: body.temperature });
-      appendJsonl(memoryFile(), {
-        id: crypto.randomUUID(),
-        type: 'route',
-        content: text,
-        response: r.response,
-        via: r.via,
-        tier: r.tier,
-        timestamp: new Date().toISOString()
-      });
-      return json(res, 200, r);
-    } catch (e) {
-      return json(res, 500, { ok: false, error: e.message });
-    }
-  }
-  // Jarvis voice/vision/skills endpoints
-  if (jarvisHandler && pathname.startsWith('/api/jarvis/')) {
-    try {
-      // Special raw handlers for audio streaming + uploads
-      if (pathname === '/api/jarvis/speak/audio') {
-        const id = (searchParams.get('id') || '').replace(/[^\w.-]/g, '');
-        const tmpDir = require('os').tmpdir();
-        const file = path.join(tmpDir, id);
-        if (id && id.startsWith('jarvis-tts-') && fs.existsSync(file)) {
-          res.writeHead(200, {
-            'content-type': 'audio/wav',
-            'content-length': fs.statSync(file).size,
-            'cache-control': 'no-store'
-          });
-          return fs.createReadStream(file).pipe(res);
-        }
-        return json(res, 404, { ok: false, error: 'audio not found' });
-      }
-      if (pathname === '/api/jarvis/listen/upload') {
-        const tmpDir = require('os').tmpdir();
-        const file = path.join(tmpDir, `jarvis-upload-${Date.now()}.webm`);
-        const out = fs.createWriteStream(file);
-        req.pipe(out);
-        await new Promise((resolve, reject) => { out.on('finish', resolve); out.on('error', reject); });
-        try {
-          const stt = require('./voice/faster-whisper-stt');
-          await stt.ensureFasterWhisper(logFn);
-          const r = await stt.transcribe(file, { model: 'base' });
-          return json(res, 200, { ok: true, ...r, file });
-        } catch (e) {
-          return json(res, 500, { ok: false, error: e.message });
-        }
-      }
-      if (pathname === '/api/jarvis/see/upload') {
-        const tmpDir = require('os').tmpdir();
-        const file = path.join(tmpDir, `jarvis-uplimg-${Date.now()}.jpg`);
-        const out = fs.createWriteStream(file);
-        req.pipe(out);
-        await new Promise((resolve, reject) => { out.on('finish', resolve); out.on('error', reject); });
-        try {
-          const vision = require('./vision/florence-vision');
-          await vision.ensureFlorence(logFn);
-          const r = await vision.describe(file, { task: '<MORE_DETAILED_CAPTION>' });
-          return json(res, 200, { ok: true, ...r, file });
-        } catch (e) {
-          return json(res, 500, { ok: false, error: e.message });
-        }
-      }
-      const body = req.method === 'POST' ? await getBody(req) : null;
-      const result = await jarvisHandler.handle(pathname, body, {
-        json: (status, data) => json(res, status, data),
-        getBody: () => getBody(req)
-      });
-      if (result === null) return json(res, 404, { ok: false, error: 'unknown jarvis endpoint' });
-      return json(res, result.ok === false ? 500 : 200, result);
-    } catch (e) {
-      return json(res, 500, { ok: false, error: e.message });
-    }
+    return json(res, 200, { ok: true, brains, local: brains, external: externalBrains, cloud: externalBrains });
   }
   if (pathname === '/api/brains/select') {
     const body = await getBody(req);
@@ -2379,27 +3123,86 @@ async function route(req, res) {
   if (pathname === '/api/device/probe' || pathname === '/api/capabilities/probe') {
     return json(res, 200, await machineProbe());
   }
-  if (pathname === '/api/setup/options' || pathname === '/api/onboarding/setup') {
-    return json(res, 200, await setupOptions());
+  if (pathname === '/api/system/scan') {
+    return json(res, 200, await systemScan());
   }
-  if (pathname === '/api/device/auto-probe' || pathname === '/api/mission/auto-probe') {
-    return json(res, 200, await autoProbeDevice());
+  if (pathname === '/api/models/catalog') {
+    return json(res, 200, await modelCatalog());
   }
-  if (pathname === '/api/mind/status') {
+  if (pathname === '/api/soul') {
+    if (req.method === 'POST') {
+      const body = await getBody(req);
+      return json(res, 200, { ok: true, soul: saveSoul(body) });
+    }
+    return json(res, 200, { ok: true, soul: loadSoul() });
+  }
+  if (pathname === '/api/agents/roles') {
+    return json(res, 200, { ok: true, roles: AGENT_ROLES.map((r) => ({ id: r.id, name: r.name, tagline: r.tagline, tools: r.tools })) });
+  }
+  if (pathname === '/api/swarm/run') {
+    const body = await getBody(req);
+    try { return json(res, 200, await runSwarm(body.task || body.goal || body.content, body.roles || body.agents)); }
+    catch (e) { return json(res, 400, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/agent/run') {
+    const body = await getBody(req);
+    try { return json(res, 200, await runAgentLoop(body.goal || body.task || body.content, body)); }
+    catch (e) { agentRunning = false; return json(res, 400, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/activity') {
+    const since = Number(searchParams.get('since') || 0);
     const board = readMissionBoard();
+    const summary = missionSummary(board);
     return json(res, 200, {
       ok: true,
-      agent: 'ABUZ8 OS Agent',
-      current_time: new Date().toISOString(),
-      framework: 'four-layer local mind',
-      layers: [
-        { id: 'memory', name: 'Memory', status: 'ready', count: readMemory(500).length, storage: path.join(dataRoot, 'memory') },
-        { id: 'tasks', name: 'Tasks', status: 'ready', summary: missionSummary(board), storage: missionFile() },
-        { id: 'personality', name: 'Personality', status: 'ready', active: readRuntimeConfig().active_soul || 'default', storage: path.join(dataRoot, 'config') },
-        { id: 'missions', name: 'Project missions', status: 'ready', columns: Object.fromEntries(Object.entries(board.columns || {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])), storage: path.join(dataRoot, 'mission') }
-      ],
-      data_root: dataRoot
+      seq: activitySeq,
+      agent_running: agentRunning,
+      events: activityLog.filter((e) => e.id > since),
+      missions: { total: summary.total, counts: summary.counts, next: summary.next }
     });
+  }
+  if (pathname === '/api/browser/do') {
+    const body = await getBody(req);
+    try { return json(res, 200, { ok: true, result: await browserDo(body) }); }
+    catch (e) { return json(res, 400, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/gui/do') {
+    const body = await getBody(req);
+    try { return json(res, 200, { ok: true, result: await guiDo(body) }); }
+    catch (e) { const s = /consent|Allow actions/i.test(e.message) ? 403 : 400; return json(res, s, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/content/generate') {
+    const body = await getBody(req);
+    try { return json(res, 200, await generateContent(body)); }
+    catch (e) { return json(res, 400, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/content/formats') {
+    return json(res, 200, { ok: true, formats: Object.keys(CONTENT_FORMATS) });
+  }
+  if (pathname === '/api/x/post') {
+    const body = await getBody(req);
+    return json(res, 200, await xPost(body));
+  }
+  if (pathname === '/api/growth/seed') {
+    return json(res, 200, seedGrowthBoard());
+  }
+  if (pathname === '/api/skills/installed') {
+    return json(res, 200, { ok: true, skills: listSkills(), dir: path.join(dataRoot, 'skills') });
+  }
+  if (pathname === '/api/bridge/status') {
+    return json(res, 200, bridgeStatus());
+  }
+  if (pathname === '/api/bridge/reinstall' || pathname === '/api/bridge/reinstate') {
+    return json(res, 200, reinstateBridge());
+  }
+  if (pathname === '/api/cmd/run') {
+    const body = await getBody(req);
+    try {
+      return json(res, 200, { ok: true, result: await actionCmdRun(body) });
+    } catch (e) {
+      const status = /consent|Allow actions/i.test(e.message) ? 403 : 400;
+      return json(res, status, { ok: false, error: e.message });
+    }
   }
   if (pathname === '/api/optional-probe') {
     return json(res, 200, { ok: false, optional: true, manual: true, port: searchParams.get('port') || null });
@@ -2434,6 +3237,14 @@ async function route(req, res) {
     const cfg = readJson(file, {});
     const imported = mergeMcpServers(cfg.mcpServers || {}, 'claude-desktop');
     return json(res, 200, { ok: true, imported: imported.length, merged: imported, source: file, mcp_config: mcpConfigPath() });
+  }
+  if (pathname === '/api/mcp/import/antigravity') {
+    const imported = importAntigravity();
+    return json(res, 200, { ok: true, imported: imported.length, merged: imported, sources: antigravityConfigPaths().filter(exists), mcp_config: mcpConfigPath() });
+  }
+  if (pathname === '/api/mcp/import/claude-extensions') {
+    const imported = importClaudeExtensions();
+    return json(res, 200, { ok: true, imported: imported.length, merged: imported, source: claudeExtensionsDir(), mcp_config: mcpConfigPath() });
   }
   if (pathname === '/api/mcp/import/docker-desktop') {
     const available = await commandExists('docker', ['mcp', '--help']);
@@ -2583,29 +3394,55 @@ async function route(req, res) {
     jobs.unshift(job);
     return json(res, 200, { ok: true, job, mode: 'local-fallback' });
   }
+  if (pathname === '/api/attachments') {
+    return json(res, 200, attachmentsStatus());
+  }
   if (pathname === '/api/voice/status' || pathname === '/api/tts/status') {
-    const voices = await listWindowsTtsVoices();
+    const sidecar = await ensureVoiceSidecar();
+    const sidecarUp = Boolean(sidecar && sidecar.ok);
+    const piper = piperAvailable();
+    const piperVoices = piper ? listPiperVoices() : [];
+    const winVoices = await listWindowsTtsVoices();
     const recognizers = await listWindowsSttRecognizers();
+    const kokoroVoices = sidecarUp
+      ? ['bm_fable', 'bm_george', 'bf_emma', 'am_adam', 'am_michael', 'af_heart', 'af_bella', 'af_nicole'].map((v) => ({ id: v, name: `Kokoro · ${v}`, engine: 'kokoro', neural: true }))
+      : [];
+    const voices = [
+      ...kokoroVoices,
+      ...piperVoices.map((v) => ({ id: v.id, name: v.name, engine: 'piper', lang: v.lang, neural: true, arabic: v.arabic })),
+      ...winVoices.map((v) => ({ id: v, name: v, engine: 'windows', neural: false }))
+    ];
     return json(res, 200, {
       ok: true,
-      native_tts: process.platform === 'win32' && voices.length > 0,
-      native_tts_engine: process.platform === 'win32' ? 'Windows System.Speech/SAPI' : null,
-      native_stt: process.platform === 'win32' && recognizers.length > 0,
-      native_stt_engine: process.platform === 'win32' ? 'Windows System.Speech DictationGrammar' : null,
-      browser_stt: true,
-      browser_tts: true,
-      streaming_chat_tts: true,
-      recognizers,
-      voices,
-      voice_profiles: voiceProfiles(voices),
-      local_model_assets: listLocalModelAssets().slice(0, 40),
-      note: 'This build uses native Windows speech APIs for offline voice in/out when installed on the target machine. Browser speech remains the fallback path.'
+      voice_engine: sidecarUp ? 'kokoro-gpu' : (piper ? 'piper-neural' : 'windows-sapi'),
+      neural_tts: sidecarUp || piper,
+      neural_stt: sidecarUp || whisperAvailable(),
+      stt_engine: sidecarUp ? 'whisper-large-v3-gpu' : (whisperAvailable() ? 'whisper.cpp' : 'windows-stt'),
+      sidecar: sidecarUp ? sidecar : null,
+      native_tts: process.platform === 'win32' && winVoices.length > 0,
+      browser_stt: true, browser_tts: true, streaming_chat_tts: true,
+      live_talk: sidecarUp,
+      presets: ['normal', 'calm', 'fast', 'narrator', 'cartoon'],
+      recognizers, voices,
+      note: sidecarUp
+        ? `Native GPU voice active: Whisper large-v3 (hearing) + Kokoro (speaking, ${sidecar.default_voice || 'bm_fable'}) on ${sidecar.device}.`
+        : (piper ? 'Offline neural voice via Piper is active. Browser/Windows speech remain fallbacks.' : 'Install the Piper attachment or the voice sidecar for natural neural voices.')
     });
   }
   if (pathname === '/api/stt' || pathname === '/api/stt/transcribe') {
     const body = await getBody(req);
+    const audio = body.audio_base64 || body.wav_base64 || body.audio || body.raw || '';
+    // Tier 1: GPU sidecar (Whisper large-v3). Tier 2: whisper.cpp attachment. Tier 3: Windows STT.
+    const sidecar = await ensureVoiceSidecar();
+    if (sidecar && sidecar.ok) {
+      try {
+        const r = await httpPostBuffer(`http://127.0.0.1:${VOICE_SIDECAR_PORT}/stt`, { audio_base64: audio });
+        const parsed = JSON.parse(r.buffer.toString('utf8'));
+        if (parsed.ok) return json(res, 200, parsed);
+      } catch {}
+    }
     try {
-      const result = await transcribeWindowsStt(body.audio_base64 || body.wav_base64 || body.audio || body.raw || '');
+      const result = whisperAvailable() ? await transcribeWhisper(audio) : await transcribeWindowsStt(audio);
       return json(res, 200, { ok: true, ...result });
     } catch (e) {
       return json(res, 500, { ok: false, error: e.message, fallback: 'browser-stt' });
@@ -2613,8 +3450,24 @@ async function route(req, res) {
   }
   if (pathname === '/api/tts' || pathname === '/api/tts/stream') {
     const body = await getBody(req);
+    // Tier 1: GPU sidecar (Kokoro-82M, bm_fable default). Tier 2: Piper. Tier 3: Windows SAPI.
+    const sidecar = await ensureVoiceSidecar();
+    if (sidecar && sidecar.ok) {
+      try {
+        const r = await httpPostBuffer(`http://127.0.0.1:${VOICE_SIDECAR_PORT}/tts`, {
+          text: body.text || body.raw || '', voice: body.voice || '', speed: body.speed || 1.0
+        });
+        if (r.status === 200 && String(r.headers['content-type'] || '').includes('audio')) {
+          return binary(res, 200, r.buffer, 'audio/wav');
+        }
+      } catch {}
+    }
     try {
-      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '', body.profile || body.voice_profile || '');
+      if (piperAvailable()) {
+        const r = await synthesizePiper(body.text || body.raw || '', body.voice || '', body.preset);
+        return binary(res, 200, r.wav, 'audio/wav');
+      }
+      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '');
       return binary(res, 200, wav, 'audio/wav');
     } catch (e) {
       return json(res, 500, { ok: false, error: e.message, fallback: 'browser-tts' });
@@ -2623,14 +3476,11 @@ async function route(req, res) {
   if (pathname === '/api/avatar/speak') {
     const body = await getBody(req);
     try {
-      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '', body.profile || body.voice_profile || '');
+      const wav = await synthesizeWindowsTts(body.text || body.raw || '', body.voice || '');
       return binary(res, 200, wav, 'audio/wav');
     } catch (e) {
       return json(res, 200, { ok: true, queued: false, fallback: 'browser-tts', error: e.message });
     }
-  }
-  if (pathname === '/api/models/local' || pathname === '/api/local-models') {
-    return json(res, 200, { ok: true, roots: modelRoots(), models: listLocalModelAssets() });
   }
   if (pathname === '/api/avatar/health') {
     const voices = await listWindowsTtsVoices();
@@ -2639,7 +3489,58 @@ async function route(req, res) {
   if (pathname === '/api/routing/leaderboard') return json(res, 200, { ok: true, rows: [{ lane: 'portable-core', n_calls: readMemory(500).length, mean_success: 1, cost_per_1k: 0 }] });
   if (pathname === '/api/provenance/stats') return json(res, 200, { ok: true, fact_count: readMemory(1000).length, agent_count: 1, open_conflicts: 0 });
   if (pathname === '/api/security/integrity' || pathname === '/api/security/audit') return json(res, 200, { ok: true, message: 'Portable runtime folders and local API are reachable.', data_root: dataRoot });
-  if (pathname === '/api/telephony/status') return json(res, 200, { ok: true, active: false, hint: 'Connect Twilio or another provider in settings.' });
+  if (pathname === '/api/telephony/status') {
+    const t = twilioCreds();
+    const configured = Boolean(t.sid && t.token && t.from);
+    return json(res, 200, {
+      ok: true, active: configured, provider: 'twilio', number: configured ? t.from : null,
+      inbound_webhook: `${tunnelUrl || `http://127.0.0.1:${PORT}`}/api/telephony/inbound`,
+      tunnel: tunnelUrl || null,
+      hint: configured
+        ? 'Two-way SMS is live. Point your Twilio number\'s messaging webhook at inbound_webhook (start the tunnel for a public URL).'
+        : 'Give the OS its own phone number: buy a Twilio number, then set twilio_account_sid, twilio_auth_token, twilio_from in Settings.'
+    });
+  }
+  if (pathname === '/api/telephony/send') {
+    requireActionConsent();
+    const body = await getBody(req);
+    const to = String(body.to || '').trim();
+    const text = String(body.text || body.message || '').trim();
+    if (!to || !text) return json(res, 400, { ok: false, error: 'to and text are required' });
+    try {
+      const r = await twilioSendSms(to, text);
+      appendJsonl(path.join(dataRoot, 'logs', 'tool-calls.jsonl'), { ok: true, tool: 'telephony_send', to, sid: r.sid, timestamp: new Date().toISOString() });
+      return json(res, 200, { ok: true, sid: r.sid, status: r.status, to: r.to });
+    } catch (e) { return json(res, 200, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/telephony/inbound') {
+    // Twilio posts x-www-form-urlencoded; getBody hands it to us as {raw}.
+    const body = await getBody(req);
+    const form = new URLSearchParams(body.raw || '');
+    const from = form.get('From') || body.From || 'unknown';
+    const text = (form.get('Body') || body.Body || '').trim();
+    let reply = 'ABUZ8 OS received your message.';
+    if (text) {
+      try { const r = await agenticReply(text, { role: 'sms' }); reply = (r.response || '').slice(0, 1500) || reply; } catch {}
+    }
+    pushActivity('telephony', `SMS from ${from}`, text.slice(0, 120));
+    res.writeHead(200, { 'content-type': 'text/xml' });
+    return res.end(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`);
+  }
+  if (pathname === '/api/tunnel/status') {
+    return json(res, 200, { ok: true, active: Boolean(tunnelProc && tunnelUrl), url: tunnelUrl || null, mobile_app: tunnelUrl ? `${tunnelUrl}/app` : null });
+  }
+  if (pathname === '/api/tunnel/start') {
+    requireActionConsent();
+    try {
+      const url = await startTunnel();
+      return json(res, 200, { ok: true, url, mobile_app: `${url}/app`, note: 'Anyone with this URL can reach the OS — it is random and unlisted, but treat it like a key. Stop the tunnel when done.' });
+    } catch (e) { return json(res, 200, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/tunnel/stop') {
+    stopTunnel();
+    return json(res, 200, { ok: true, active: false });
+  }
   if (pathname === '/api/crm/health') return json(res, 200, { ok: true, mode: 'local-fallback', hint: 'CRM data is stored locally until Stripe or an external CRM is connected.' });
   if (pathname === '/api/chimera/panels') {
     const embedded = embeddedBrainStatus();
@@ -2665,12 +3566,17 @@ async function route(req, res) {
   }
   if (pathname === '/api/connections/discover') return json(res, 200, { ok: true, connections: [{ id: 'portable-core', status: 'online', url: `http://127.0.0.1:${PORT}` }] });
   if (pathname === '/api/revenue/summary' || pathname === '/api/cost/summary' || pathname === '/api/usage' || pathname === '/api/traces') return json(res, 200, { ok: true, rows: [], total: 0, cost: 0 });
-  if (pathname === '/api/actions/status') return json(res, 200, { ok: true, allow_actions: actionConsentGranted, session_only: true });
+  if (pathname === '/api/actions/status') return json(res, 200, { ok: true, allow_actions: actionsAllowed(), session_only: false });
   if (pathname === '/api/actions/consent') {
     const body = await getBody(req);
     actionConsentGranted = body.allow_actions === true;
+    // Persist so it survives relaunch (read back by actionsAllowed / start()).
+    const s = readJson(settingsPath(), {});
+    s.auto_grant_actions = actionConsentGranted;
+    s.updated_at = new Date().toISOString();
+    writeJson(settingsPath(), s);
     appendJsonl(path.join(dataRoot, 'logs', 'action-consent.jsonl'), { allow_actions: actionConsentGranted, timestamp: new Date().toISOString() });
-    return json(res, 200, { ok: true, allow_actions: actionConsentGranted, session_only: true });
+    return json(res, 200, { ok: true, allow_actions: actionConsentGranted, session_only: false });
   }
   if (pathname === '/api/tools/list') return json(res, 200, { ok: true, tools: localToolsList(), custom_tools_file: toolsFile() });
   if (pathname === '/api/tools/create') {
@@ -2687,6 +3593,7 @@ async function route(req, res) {
     try {
       const result = await callLocalTool(body.tool || body.name, body.args || body);
       appendJsonl(path.join(dataRoot, 'logs', 'tool-calls.jsonl'), { ...result, timestamp: new Date().toISOString() });
+      pushActivity('tool', `Tool: ${result.tool || body.tool || body.name}`, result.ok === false ? (result.error || 'failed') : 'ok');
       return json(res, 200, result);
     } catch (e) {
       return json(res, 400, { ok: false, error: e.message });
@@ -2700,6 +3607,7 @@ async function route(req, res) {
     const body = await getBody(req);
     try {
       const task = upsertMissionTask(body);
+      pushActivity('mission', `Task: ${task.title}`, `→ ${task.column} · ${task.owner}`);
       const board = readMissionBoard();
       return json(res, 200, { ok: true, task, board, summary: missionSummary(board) });
     } catch (e) {
@@ -2710,6 +3618,7 @@ async function route(req, res) {
     const body = await getBody(req);
     try {
       const task = moveMissionTask(body.id, body.column);
+      pushActivity('mission', `Moved: ${task.title}`, `→ ${task.column}`);
       const board = readMissionBoard();
       return json(res, 200, { ok: true, task, board, summary: missionSummary(board) });
     } catch (e) {
@@ -2730,28 +3639,235 @@ async function route(req, res) {
     });
   }
   if (pathname === '/api/sessions/summary') return json(res, 200, { ok: true, sessions: [] });
-  if (pathname === '/api/souls/list') {
-    const cfg = readRuntimeConfig();
-    return json(res, 200, {
-      ok: true,
-      active: cfg.active_soul || 'default',
-      souls: [
-        { name: 'default', display_name: 'Default Agent', role: 'calm practical desktop operator' },
-        { name: 'operator', display_name: 'Operator', role: 'tool-first desktop control and verification' },
-        { name: 'researcher', display_name: 'Researcher', role: 'web-aware question answering and source gathering' },
-        { name: 'builder', display_name: 'Builder', role: 'projects, tasks, and implementation planning' }
-      ]
-    });
-  }
-  if (pathname === '/api/souls/active') {
+  if (pathname === '/api/souls/list') return json(res, 200, { ok: true, souls: ['portable-core'] });
+  if (pathname === '/api/souls/active') return json(res, 200, { ok: true });
+  if (pathname === '/api/telegram/send') {
+    const settings = readJson(settingsPath(), {});
+    const token = settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return json(res, 200, { ok: false, error: 'Telegram not configured. Set a bot token in Settings.' });
     const body = await getBody(req);
-    const soul = slug(body.soul || body.name || 'default') || 'default';
-    writeRuntimeConfigPatch({ active_soul: soul });
-    return json(res, 200, { ok: true, active: soul, session_only: false });
+    const chatId = body.chat_id || settings.telegram_chat_id;
+    if (!chatId) return json(res, 200, { ok: false, error: 'No chat_id configured. Send /start to your bot first.' });
+    try {
+      const resp = await fetchUrl(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: body.text || body.message || '', parse_mode: 'Markdown' })
+      });
+      const data = JSON.parse(resp);
+      return json(res, 200, { ok: data.ok, error: data.description || null });
+    } catch (e) {
+      return json(res, 200, { ok: false, error: e.message });
+    }
   }
-  if (pathname === '/api/telegram/send') return json(res, 200, { ok: false, error: 'Telegram is not configured in portable mode.' });
+
+  // ── SETTINGS API ──────────────────────────────────────────────
+  if (pathname === '/api/settings') {
+    if (req.method === 'POST') {
+      const body = await getBody(req);
+      const cfg = readJson(settingsPath(), {});
+      for (const k of Object.keys(body)) cfg[k] = body[k];
+      cfg.updated_at = new Date().toISOString();
+      writeJson(settingsPath(), cfg);
+      return json(res, 200, { ok: true, settings: cfg });
+    }
+    const s = readJson(settingsPath(), {});
+    s._dataRoot = dataRoot;
+    s._port = PORT;
+    return json(res, 200, { ok: true, settings: s });
+  }
+
+  // ── PROVIDERS API ────────────────────────────────────────────
+  if (pathname === '/api/providers') {
+    if (req.method === 'POST') {
+      const body = await getBody(req);
+      const cfg = readJson(providersPath(), { providers: [] });
+      const existing = cfg.providers.findIndex(p => p.name === body.name);
+      const entry = { name: body.name, type: body.type || 'openai', endpoint: body.endpoint || '', model: body.model || '', api_key: body.api_key || '', enabled: body.enabled !== false, context_length: Number(body.context_length) || 8192, parameters: body.parameters || { temperature: 0.7, max_tokens: 2048 } };
+      if (existing >= 0) cfg.providers[existing] = entry;
+      else cfg.providers.push(entry);
+      writeJson(providersPath(), cfg);
+      return json(res, 200, { ok: true, providers: cfg.providers });
+    }
+    const cfg = readJson(providersPath(), { providers: [] });
+    return json(res, 200, { ok: true, providers: cfg.providers });
+  }
+
+  // ── PROVIDER CHAT ────────────────────────────────────────────
+  if (pathname === '/api/provider/chat') {
+    const body = await getBody(req);
+    const providerName = body.provider || body.brain || 'lmstudio';
+    const cfg = readJson(providersPath(), { providers: [] });
+    const provider = cfg.providers.find(p => p.name === providerName);
+    if (!provider) return json(res, 200, { ok: false, error: `Provider '${providerName}' not configured. Add it in Settings.`, fallback: true });
+    if (!provider.enabled) return json(res, 200, { ok: false, error: `Provider '${providerName}' is disabled.`, fallback: true });
+    try {
+      const result = await callProviderChat(provider, body.content || body.message || body.prompt || '');
+      return json(res, 200, { ok: true, response: result, provider: providerName, brain: provider.model || providerName });
+    } catch (e) {
+      return json(res, 200, { ok: false, error: e.message, fallback: true });
+    }
+  }
+
+  // ── MCP SERVER RUNTIME ──────────────────────────────────────
+  if (pathname === '/api/mcp/servers') {
+    const cfg = readJson(mcpConfigPath(), { mcpServers: {} });
+    const running = Array.from(mcpProcesses.keys());
+    const servers = Object.entries(cfg.mcpServers).map(([name, spec]) => ({ name, command: spec.command, args: spec.args || [], enabled: spec.enabled !== false, source: spec.source || 'catalog', note: spec.note || '', running: running.includes(name) }));
+    return json(res, 200, { ok: true, servers });
+  }
+
+  if (pathname.match(/^\/api\/mcp\/servers\/.+\/start$/)) {
+    const name = pathname.split('/')[4];
+    try {
+      const pid = await startMcpServer(name);
+      return json(res, 200, { ok: true, message: `Started MCP server: ${name}`, pid });
+    } catch (e) { return json(res, 200, { ok: false, error: e.message }); }
+  }
+  if (pathname.match(/^\/api\/mcp\/servers\/.+\/stop$/)) {
+    const name = pathname.split('/')[4];
+    stopMcpServer(name);
+    return json(res, 200, { ok: true, message: `Stopped MCP server: ${name}` });
+  }
+  if (pathname.match(/^\/api\/mcp\/servers\/.+\/tools$/)) {
+    const name = pathname.split('/')[4];
+    try {
+      const tools = await mcpListTools(name);
+      return json(res, 200, { ok: true, server: name, tools });
+    } catch (e) { return json(res, 200, { ok: false, error: e.message }); }
+  }
+  if (pathname === '/api/mcp/call') {
+    const body = await getBody(req);
+    const serverName = String(body.server || '').trim();
+    const toolName2 = String(body.tool || body.name || '').trim();
+    if (!serverName || !toolName2) return json(res, 400, { ok: false, error: 'server and tool are required' });
+    try {
+      const result = await mcpCallTool(serverName, toolName2, body.args || body.arguments || {});
+      appendJsonl(path.join(dataRoot, 'logs', 'tool-calls.jsonl'), { ok: true, mcp: serverName, tool: toolName2, timestamp: new Date().toISOString() });
+      return json(res, 200, { ok: true, server: serverName, tool: toolName2, result });
+    } catch (e) { return json(res, 200, { ok: false, error: e.message }); }
+  }
+  if (pathname.match(/^\/api\/mcp\/servers\/.+\/enable$/)) {
+    const name = pathname.split('/')[4];
+    const body = await getBody(req);
+    const cfg = readJson(mcpConfigPath(), { mcpServers: {} });
+    if (!cfg.mcpServers[name]) return json(res, 404, { ok: false, error: `MCP server '${name}' not found` });
+    cfg.mcpServers[name].enabled = body.enabled !== false;
+    writeJson(mcpConfigPath(), cfg);
+    return json(res, 200, { ok: true, enabled: cfg.mcpServers[name].enabled, name });
+  }
+
+  // ── PERMISSION REQUEST ──────────────────────────────────────
+  if (pathname === '/api/actions/request') {
+    const body = await getBody(req);
+    return json(res, 200, { ok: true, action_required: true, tool: body.tool || 'unknown', reason: body.reason || 'This action requires your permission.', request_id: `perm-${Date.now()}`, prompt: `⚠️ **Permission Request**: ${body.reason || 'This action requires your permission.'}\n\nType \`/allow-actions\` to grant permission for this session, or type \`/deny\` to reject.` });
+  }
+
+  // ── TELEGRAM POLL ──────────────────────────────────────────
+  if (pathname === '/api/telegram/poll') {
+    const settings = readJson(settingsPath(), {});
+    const token = settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return json(res, 200, { ok: false, error: 'No token configured' });
+    try {
+      const offset = settings.telegram_update_offset || 0;
+      const resp = await fetchUrl(`https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=5`, { timeout: 10000 });
+      const data = JSON.parse(resp);
+      if (data.ok && data.result && data.result.length > 0) {
+        const maxUpdate = Math.max(...data.result.map(u => u.update_id));
+        const msgs = data.result.filter(u => u.message && u.message.text);
+        for (const msg of msgs) {
+          if (msg.message.text === '/start') {
+            settings.telegram_chat_id = String(msg.message.chat.id);
+            settings.telegram_update_offset = maxUpdate + 1;
+            writeJson(settingsPath(), settings);
+            // Send welcome
+            await fetchUrl(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: msg.message.chat.id, text: '✅ ABUZ8 OS connected! You can now receive notifications here.' })
+            });
+            return json(res, 200, { ok: true, registered: true, chat_id: String(msg.message.chat.id) });
+          }
+        }
+        settings.telegram_update_offset = maxUpdate + 1;
+        writeJson(settingsPath(), settings);
+      }
+      return json(res, 200, { ok: true, registered: false, message: 'Send /start to your bot from Telegram to register.' });
+    } catch (e) {
+      return json(res, 200, { ok: false, error: e.message });
+    }
+  }
 
   return json(res, 404, { ok: false, error: `No portable-core endpoint for ${pathname}` });
+}
+
+// Read the dashboard HTML from disk (works inside the asar via Electron fs).
+function readRendererHtml() {
+  const candidates = [
+    path.join(__dirname, 'renderer', 'index.html'),
+    process.resourcesPath ? path.join(process.resourcesPath, 'app.asar', 'renderer', 'index.html') : null
+  ].filter(Boolean);
+  for (const f of candidates) { try { if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8'); } catch {} }
+  return null;
+}
+
+// Resolve a file inside the renderer/ folder (works inside the asar via Electron fs).
+function rendererFilePath(rel) {
+  const safe = String(rel || '').replace(/\\/g, '/').replace(/\.\.+/g, '').replace(/^\/+/, '');
+  if (!safe) return null;
+  const candidates = [
+    path.join(__dirname, 'renderer', safe),
+    process.resourcesPath ? path.join(process.resourcesPath, 'app.asar', 'renderer', safe) : null
+  ].filter(Boolean);
+  return candidates.find((f) => { try { return fs.existsSync(f) && fs.statSync(f).isFile(); } catch { return false; } }) || null;
+}
+function serveRendererFile(res, rel) {
+  const f = rendererFilePath(rel);
+  if (!f) return false;
+  const ext = path.extname(f).toLowerCase();
+  const mime = ext === '.html' ? 'text/html; charset=utf-8'
+    : ext === '.json' ? 'application/json; charset=utf-8'
+    : ext === '.js' ? 'application/javascript; charset=utf-8'
+    : ext === '.css' ? 'text/css; charset=utf-8'
+    : ext === '.png' ? 'image/png' : ext === '.svg' ? 'image/svg+xml'
+    : ext === '.ico' ? 'image/x-icon' : ext === '.webmanifest' ? 'application/manifest+json'
+    : 'application/octet-stream';
+  try {
+    const buf = fs.readFileSync(f);
+    res.writeHead(200, { 'content-type': mime, 'access-control-allow-origin': '*', 'cache-control': 'no-cache' });
+    res.end(buf);
+    return true;
+  } catch { return false; }
+}
+
+// Is the request from this machine (always trusted)?
+function isLocalRequest(req) {
+  const a = (req.socket && req.socket.remoteAddress) || '';
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+}
+
+// LAN URLs the phone can open (IPv4 non-internal interfaces), key embedded.
+function lanUrls(key) {
+  const q = key ? `?key=${key}` : '';
+  const urls = [`http://127.0.0.1:${PORT}/app${q}`];
+  try {
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const ni of ifaces[name] || []) {
+        if (ni.family === 'IPv4' && !ni.internal) urls.push(`http://${ni.address}:${PORT}/app${q}`);
+      }
+    }
+  } catch {}
+  return urls;
+}
+
+// Re-bind the running server to a new host (localhost <-> LAN) without restart.
+function rebindServer(host) {
+  return new Promise((resolve) => {
+    if (!server || host === serverHost) { serverHost = host; return resolve(serverHost); }
+    server.close(() => {
+      serverHost = host;
+      server.listen(PORT, serverHost, () => { logFn(`portable core re-bound to http://${serverHost}:${PORT}`); resolve(serverHost); });
+    });
+  });
 }
 
 async function start(options = {}) {
@@ -2762,6 +3878,10 @@ async function start(options = {}) {
     || process.execPath;
   dataRoot = resolveDataRoot(options.app);
   initFolders();
+  // Restore persisted action consent so "Allow actions" survives relaunch.
+  try { if (readJson(settingsPath(), {}).auto_grant_actions === true) actionConsentGranted = true; } catch {}
+  // Bind to the LAN only if the user has opted in; otherwise localhost-only.
+  try { if (readJson(settingsPath(), {}).lan_access === true) serverHost = '0.0.0.0'; } catch {}
   server = http.createServer((req, res) => route(req, res).catch((e) => json(res, 500, { ok: false, error: e.message })));
   await new Promise((resolve, reject) => {
     server.once('error', async (e) => {
@@ -2771,52 +3891,232 @@ async function start(options = {}) {
           server = null;
           return resolve();
         }
-        return reject(new Error(`ABUZ8 bundled core could not bind 127.0.0.1:${PORT}. Close the older ABUZ8/Qadir process or set ABUZ8_PORT to a free port.`));
+        return reject(new Error(`ABUZ8 bundled core could not bind ${serverHost}:${PORT}. Close the older ABUZ8/Qadir process or set ABUZ8_PORT to a free port.`));
       }
       reject(e);
     });
-    server.listen(PORT, '127.0.0.1', resolve);
+    server.listen(PORT, serverHost, resolve);
   });
-  if (server) logFn(`portable core listening on http://127.0.0.1:${PORT}`);
+  if (server) logFn(`portable core listening on http://${serverHost}:${PORT}`);
   logFn(`data root: ${dataRoot}`);
-  setTimeout(() => {
-    autoProbeDevice()
-      .then((p) => logFn(`device auto-probe saved: ${p.file}`))
-      .catch((e) => logFn(`device auto-probe skipped: ${e.message}`));
-  }, 1200);
-  // Jarvis multi-brain pool: start in background, do not block server boot
-  setTimeout(() => {
-    startBrainPool().then((pool) => {
-      const alive = pool.filter((e) => e.process || e.alive).length;
-      logFn(`[brain-pool] started ${alive}/${pool.length} brains: ${pool.map((e) => e.tier).join(',')}`);
-    }).catch((e) => {
-      logFn(`[brain-pool] start failed: ${e.message}`);
-    });
-  }, 1500);
-  // Install Jarvis voice/vision/skills layer
+  ensureVoiceSidecar().catch(() => {});
+  // Self-heal the two-way Claude Desktop symbiosis on every launch.
   try {
-    jarvisHandler = jarvis.installJarvisEndpoints({ getDataRoot: () => dataRoot }, { log: logFn });
-  } catch (e) {
-    logFn(`[jarvis] install failed: ${e.message}`);
-  }
+    const b = reinstateBridge();
+    logFn(`claude bridge: symbiote ${b.symbiote ? 'installed' : 'present'}; imported ${b.imported.length} Claude MCP server(s).`);
+  } catch (e) { logFn('claude bridge self-heal skipped: ' + e.message); }
+  try { startTelegramPolling(); logFn('telegram bridge: polling active (set a bot token in Settings to connect your phone).'); } catch (e) {}
+  try { const adopted = await autoAdoptBrainIfNeeded(); if (adopted) logFn(`auto-adopted local GPU brain: ${adopted}`); } catch (e) {}
   return { port: PORT, dataRoot };
 }
 
+let telegramTimer = null;
 function stop() {
+  if (telegramTimer) { clearTimeout(telegramTimer); telegramTimer = null; }
   if (server) server.close();
   server = null;
   if (lfmProcess) {
     try { lfmProcess.kill(); } catch {}
     lfmProcess = null;
   }
-  // Stop pool brains
-  for (const entry of brainPool) {
-    if (entry.process && !entry.legacy) {
-      try { entry.process.kill(); } catch {}
+  for (const [name, client] of mcpProcesses) {
+    try { (client.proc || client).kill(); } catch {}
+    mcpProcesses.delete(name);
+  }
+}
+
+// ── Telegram two-way bridge: long-poll getUpdates, answer phone messages with
+//    the active (GPU) brain. Set settings.telegram_token, then send /start. ──
+async function pollTelegramOnce() {
+  const settings = readJson(settingsPath(), {});
+  const token = settings.telegram_token || process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return false;
+  const offset = settings.telegram_update_offset || 0;
+  const resp = await fetchUrl(`https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=20`, { timeout: 25000 });
+  const data = JSON.parse(resp);
+  if (!data.ok || !Array.isArray(data.result) || !data.result.length) return true;
+  const maxUpdate = Math.max(...data.result.map((u) => u.update_id));
+  for (const u of data.result) {
+    const msg = u.message;
+    if (!msg || !msg.text) continue;
+    const chatId = String(msg.chat.id);
+    settings.telegram_chat_id = chatId;
+    const send = (t) => fetchUrl(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text: String(t).slice(0, 3900) }) }).catch(() => {});
+    if (msg.text.trim() === '/start') {
+      await send('✅ ABUZ8 OS connected. Message me and I will answer from your machine (GPU brain).');
+    } else {
+      try { const r = await reasonReply(msg.text, {}); await send(r.text || '(no reply)'); }
+      catch (e) { await send('Error: ' + e.message); }
     }
   }
-  brainPool = [];
-  brainPoolEnabled = false;
+  settings.telegram_update_offset = maxUpdate + 1;
+  writeJson(settingsPath(), settings);
+  return true;
+}
+function startTelegramPolling() {
+  if (telegramTimer) return;
+  const tick = async () => {
+    let hadToken = true;
+    try { hadToken = await pollTelegramOnce(); } catch (e) { /* transient network/Telegram error */ }
+    telegramTimer = setTimeout(tick, hadToken ? 1200 : 15000);
+  };
+  telegramTimer = setTimeout(tick, 3000);
+}
+
+// ── SETTINGS / PROVIDERS HELPERS ──────────────────────────────
+function settingsPath() { return path.join(dataRoot, 'config', 'settings.json'); }
+function providersPath() { return path.join(dataRoot, 'config', 'providers.json'); }
+
+async function callProviderChat(provider, prompt, system) {
+  const endpoint = (provider.endpoint || '').replace(/\/+$/, '');
+  const model = provider.model || 'default';
+  const params = provider.parameters || { temperature: 0.7, max_tokens: 2048 };
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: prompt });
+
+  const isLm = provider.type === 'lmstudio' || endpoint.includes('localhost:1234') || endpoint.includes('127.0.0.1:1234');
+  const base = isLm ? (endpoint || 'http://localhost:1234')
+    : (provider.type === 'openai' || provider.type === 'hermes') ? (endpoint || 'https://api.openai.com/v1')
+    : endpoint;
+  const url = `${base}/v1/chat/completions`.replace('/v1/v1/', '/v1/');
+  const headers = { 'Content-Type': 'application/json' };
+  if (provider.api_key) headers['Authorization'] = `Bearer ${provider.api_key}`;
+  const body = JSON.stringify({ model, messages, temperature: params.temperature, max_tokens: params.max_tokens || 2048, stream: false });
+  const resp = await fetchUrl(url, { method: 'POST', headers, body });
+  const data = JSON.parse(resp);
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return data.choices?.[0]?.message?.content || JSON.stringify(data);
+}
+
+function fetchUrl(url, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const mod = parsed.protocol === 'https:' ? https : http;
+    const body = opts.body ? Buffer.from(opts.body) : null;
+    const req = mod.request(url, {
+      method: opts.method || 'GET',
+      headers: { ...opts.headers, ...(body ? { 'Content-Length': body.length } : {}) },
+      timeout: 30000
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+// ── MCP SERVER RUNTIME ────────────────────────────────────────
+// Real MCP client: line-delimited JSON-RPC over stdio (initialize,
+// tools/list, tools/call) so imported servers are usable, not just spawned.
+function spawnMcpClient(name, spec) {
+  // shell:true is needed for PATH shims (npx/uv/docker), but the shell splits
+  // unquoted spaces — extension paths like "Claude Extensions" must be quoted.
+  const shQuote = (s) => { s = String(s); return /[\s"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const proc = spawn(shQuote(spec.command), (spec.args || []).map(shQuote), {
+    env: { ...process.env, ...(spec.env || {}) },
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: true,
+    windowsHide: true
+  });
+  const client = { proc, buf: '', nextId: 1, pending: new Map(), initialized: null, stderrTail: '' };
+  proc.stdout.on('data', (d) => {
+    client.buf += d.toString();
+    let idx;
+    while ((idx = client.buf.indexOf('\n')) >= 0) {
+      const line = client.buf.slice(0, idx).trim();
+      client.buf = client.buf.slice(idx + 1);
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line);
+        if (msg.id != null && client.pending.has(msg.id)) {
+          const { resolve, reject, timer } = client.pending.get(msg.id);
+          client.pending.delete(msg.id);
+          clearTimeout(timer);
+          if (msg.error) reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+          else resolve(msg.result);
+        }
+      } catch {}
+    }
+  });
+  proc.stderr.on('data', (d) => { client.stderrTail = (client.stderrTail + d.toString()).slice(-800); });
+  proc.on('exit', (code) => {
+    for (const { reject, timer } of client.pending.values()) {
+      clearTimeout(timer);
+      reject(new Error(`MCP server '${name}' exited (code ${code}). ${client.stderrTail.slice(-300)}`));
+    }
+    client.pending.clear();
+    mcpProcesses.delete(name);
+    if (code !== 0) logFn(`[mcp:${name}] exited code ${code}: ${client.stderrTail.slice(0, 200)}`);
+  });
+  proc.on('error', (e) => {
+    for (const { reject, timer } of client.pending.values()) { clearTimeout(timer); reject(e); }
+    client.pending.clear();
+    mcpProcesses.delete(name);
+  });
+  return client;
+}
+
+function mcpRequest(client, name, method, params, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    const id = client.nextId++;
+    const timer = setTimeout(() => {
+      client.pending.delete(id);
+      reject(new Error(`MCP server '${name}' timed out on ${method}`));
+    }, timeoutMs);
+    client.pending.set(id, { resolve, reject, timer });
+    client.proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params: params || {} }) + '\n');
+  });
+}
+
+async function ensureMcpClient(name) {
+  let client = mcpProcesses.get(name);
+  if (client && client.proc && client.proc.exitCode === null) {
+    if (client.initialized) await client.initialized;
+    return client;
+  }
+  const cfg = readJson(mcpConfigPath(), { mcpServers: {} });
+  const spec = cfg.mcpServers[name];
+  if (!spec) throw new Error(`MCP server '${name}' not found in config`);
+  if (!spec.command) throw new Error(`MCP server '${name}' has no command configured`);
+  client = spawnMcpClient(name, spec);
+  mcpProcesses.set(name, client);
+  client.initialized = mcpRequest(client, name, 'initialize', {
+    protocolVersion: '2024-11-05',
+    capabilities: {},
+    clientInfo: { name: 'abuz8-os', version: '1.0.0' }
+  }, 60000).then(() => {
+    client.proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+  });
+  await client.initialized;
+  return client;
+}
+
+async function startMcpServer(name) {
+  const client = await ensureMcpClient(name);
+  return client.proc.pid;
+}
+
+async function mcpListTools(name) {
+  const client = await ensureMcpClient(name);
+  const result = await mcpRequest(client, name, 'tools/list', {}, 30000);
+  return result.tools || [];
+}
+
+async function mcpCallTool(name, tool, args) {
+  const client = await ensureMcpClient(name);
+  return mcpRequest(client, name, 'tools/call', { name: tool, arguments: args || {} }, 120000);
+}
+
+function stopMcpServer(name) {
+  const client = mcpProcesses.get(name);
+  if (!client) return;
+  try { (client.proc || client).kill(); } catch {}
+  mcpProcesses.delete(name);
 }
 
 module.exports = { start, stop, PORT };
